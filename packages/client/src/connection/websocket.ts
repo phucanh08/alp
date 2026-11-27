@@ -53,7 +53,7 @@ const CLOSE_AFTER_ERROR_MS = 250;
 /** A close reason may hold 123 UTF-8 bytes. */
 const MAX_CLOSE_REASON = 123;
 
-/** A URL fit for an error message: no credentials, query or fragment, which may carry a token. @param {string} url */
+/** A URL fit for an error message: no credentials, query or fragment, which may carry a token. */
 export function redactUrl(url: string): string {
   // The userinfo runs to the last '@' before the path, so a password holding '@' goes with it.
   const match = /^([a-z][a-z0-9+.-]*:\/\/)(?:[^/?#\\]*@)?([^/?#\\@]*)([^?#]*)/i.exec(String(url));
@@ -63,7 +63,6 @@ export function redactUrl(url: string): string {
 /**
  * An error safe to show or log: the original's name and message with every URL redacted, and none
  * of its other properties (an implementation may keep the URL in `input`, `target` or `cause`).
- * @param {unknown} error @param {string} url
  */
 function scrubbed(error: unknown, url: string) {
   const text = error instanceof Error ? error.message : String(error ?? '');
@@ -74,7 +73,7 @@ function scrubbed(error: unknown, url: string) {
   return clean;
 }
 
-/** `reason` cut to what a close frame may carry. @param {string} reason */
+/** `reason` cut to what a close frame may carry. */
 function closeReason(reason: string) {
   let cut = reason;
   while (utf8Length(cut) > MAX_CLOSE_REASON) cut = cut.slice(0, -1);
@@ -84,7 +83,6 @@ function closeReason(reason: string) {
 /**
  * Closes a socket that is not closed yet, with `code` where the implementation accepts it and
  * plainly where it does not, so the socket is always released.
- * @param {WebSocketLike} socket @param {number} [code] @param {string} [reason]
  */
 function release(socket: WebSocketLike, code?: number, reason?: string) {
   if (socket.readyState !== CONNECTING && socket.readyState !== OPEN) return;
@@ -95,53 +93,41 @@ function release(socket: WebSocketLike, code?: number, reason?: string) {
 /**
  * Keeps an 'error' listener on the socket for good: Node's `ws` throws an 'error' event that
  * nobody listens to as an uncaught exception, and one can follow a close or an abandoned connect.
- * @param {WebSocketLike} socket
  */
 function absorbErrors(socket: WebSocketLike) {
   if (typeof socket.addEventListener === 'function') socket.addEventListener('error', () => {});
 }
 
-/** Subscribes with addEventListener where the socket has it, else through its on<type> property. @param {WebSocketLike} socket @param {string} type @param {(event: any) => void} listener */
+/** Subscribes with addEventListener where the socket has it, else through its on<type> property. */
 function listen(socket: WebSocketLike, type: string, listener: (event: any /* any: an implementation's event */) => void) {
   if (typeof socket.addEventListener === 'function') {
     socket.addEventListener(type, listener);
     return () => socket.removeEventListener?.(type, listener);
   }
-  const key = /** @type {'onopen' | 'onmessage' | 'onerror' | 'onclose'} */ (`on${type}` as 'onopen' | 'onmessage' | 'onerror' | 'onclose');
+  const key = `on${type}` as 'onopen' | 'onmessage' | 'onerror' | 'onclose';
   const previous = socket[key];
   socket[key] = event => { previous?.(event); listener(event); };
   return () => { socket[key] = previous ?? null; };
 }
 
-/** The error an error event carries, never with an empty message. @param {any} event */
+/** The error an error event carries, never with an empty message. */
 const errorOf = (event: any /* any: an implementation's error event */): Error => {
   const message = (event?.error instanceof Error && event.error.message) || (typeof event?.message === 'string' && event.message) || 'WebSocket error';
   return event?.error instanceof Error && event.error.message ? event.error : new Error(message);
 };
 
-/**
- * Wraps an open WebSocket in an ALP transport. The transport owns the socket from then on.
- * @param {WebSocketLike} socket
- * @param {WebSocketTransportOptions} [options]
- * @returns {AlpTransport}
- */
+/** Wraps an open WebSocket in an ALP transport. The transport owns the socket from then on. */
 export function createWebSocketTransport(socket: WebSocketLike, { maxFrame = MAX_FRAME, maxBufferedBytes = 4 * MAX_FRAME }: WebSocketTransportOptions = {}): AlpTransport {
   if (socket.readyState !== OPEN) throw new AlpClientError('WebSocket is not open', { reason: 'disconnected' });
   absorbErrors(socket);
   try { socket.binaryType = 'arraybuffer'; } catch {}
-  /** @type {Set<(frame: string) => void>} */
   const messages = new Set<(frame: string) => void>();
-  /** @type {Set<(close: TransportClose) => void>} */
   const closes = new Set<(close: TransportClose) => void>();
-  /** @type {TransportClose | undefined} */
   let ended: TransportClose | undefined;
-  /** @type {Array<() => void>} */
   const detach: Array<() => void> = [];
-  /** An error event waiting for the close event that follows it. @type {Error | undefined} */
+  /** An error event waiting for the close event that follows it. */
   let failed: Error | undefined;
-  /** @type {ReturnType<typeof setTimeout> | undefined} */
   let failTimer: ReturnType<typeof setTimeout> | undefined;
-  /** @param {TransportClose} close */
   const end = (close: TransportClose) => {
     if (ended) return;
     ended = close;
@@ -152,7 +138,6 @@ export function createWebSocketTransport(socket: WebSocketLike, { maxFrame = MAX
     closes.clear();
     for (const listener of listeners) listener(close);
   };
-  /** @param {string} message @param {number} code */
   const violate = (message: string, code: number) => {
     const error = new AlpClientError(message, { reason: 'protocol' });
     release(socket, code, message);
@@ -206,20 +191,15 @@ export function createWebSocketTransport(socket: WebSocketLike, { maxFrame = MAX
  * Opens a WebSocket to `url` and resolves with its transport once it is open. The socket comes
  * from `createSocket`, else `new WebSocket(url, protocols)` with the injected or global WebSocket.
  * Errors name the URL without its credentials, query or fragment.
- * @param {string} url
- * @param {ConnectWebSocketOptions} [options]
- * @returns {Promise<AlpTransport>}
  */
 export function connectWebSocket(url: string, { WebSocket: Implementation, protocols, createSocket, signal, timeoutMs = 15_000, ...options }: ConnectWebSocketOptions = {}): Promise<AlpTransport> {
   const where = redactUrl(url);
-  /** @type {number | undefined} */
   let delay: number | undefined;
   try { delay = timerDelay(timeoutMs); } catch (error) { return Promise.reject(error); }
   if (signal?.aborted) return Promise.reject(new AlpClientError(`Connecting to ${where} was aborted`, { reason: 'aborted', cause: signal.reason }));
   // any: the global WebSocket is not in this portable module's types (no DOM lib assumed).
   const Constructor = Implementation ?? (globalThis as any).WebSocket;
   if (!createSocket && typeof Constructor !== 'function') return Promise.reject(new TypeError('No WebSocket implementation: pass options.WebSocket or options.createSocket'));
-  /** @type {WebSocketLike} */
   let socket: WebSocketLike;
   try {
     socket = createSocket ? createSocket(url, protocols) : protocols === undefined ? new Constructor(url) : new Constructor(url, protocols);
@@ -229,16 +209,13 @@ export function connectWebSocket(url: string, { WebSocket: Implementation, proto
   }
   absorbErrors(socket);
   return new Promise<AlpTransport>((resolve, reject) => {
-    /** @type {Array<() => void>} */
     const detach: Array<() => void> = [];
-    /** @type {ReturnType<typeof setTimeout> | undefined} */
     let timer: ReturnType<typeof setTimeout> | undefined;
     const settle = () => {
       for (const remove of detach.splice(0)) remove();
       if (timer !== undefined) clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
     };
-    /** @param {AlpClientError} error */
     const fail = (error: AlpClientError) => {
       settle();
       release(socket);

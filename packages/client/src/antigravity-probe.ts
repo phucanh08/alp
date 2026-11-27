@@ -62,11 +62,7 @@ function runCommand(command: string, args: string[], { env = process.env, cwd, t
   });
 }
 
-/**
- * Probes Antigravity CLI for version, status and available models.
- * @param {{ command?: string, args?: string[], env?: Record<string, string>, label?: string, id?: string}} [provider]
- * @param {{ cwd?: string, timeoutMs?: number }} [options]
- */
+/** Probes Antigravity CLI for version, status and available models. */
 export async function probeAntigravity(provider: { command?: string, args?: string[], env?: Record<string, string>, label?: string, id?: string } = {}, { cwd, timeoutMs = 20_000 }: { cwd?: string, timeoutMs?: number } = {}) {
   const command = provider.command || 'agy';
   const args = provider.args ?? [];

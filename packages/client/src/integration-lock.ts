@@ -15,14 +15,6 @@ export type IntegrationLock = {
   release(): Promise<boolean>,
 };
 
-/**
- * @typedef {{ pid: number, bootTime: number, bootId?: string, startedUptime?: number, startedAt: string, ready: boolean, lockVersion?: number, owner?: string }} IntegrationLockRecord
- * @typedef {{
- *   acquire(): Promise<{ acquired: boolean, lock: IntegrationLockRecord }>,
- *   setReady(ready: boolean): Promise<boolean>,
- *   release(): Promise<boolean>,
- * }} IntegrationLock
- */
 
 /**
  * The single-owner lock of one integration service, at `<home>/integrations/<name>.lock`, with its
@@ -30,31 +22,23 @@ export type IntegrationLock = {
  * release while it owns the lock.
  *
  * Single-host, same PID namespace, private local filesystem only. Never reap the mutation guard.
- * @param {string} home the ALP_HOME the integration runs under
- * @param {string} name the integration name, for example `web`
- * @returns {IntegrationLock}
+ * @param home the ALP_HOME the integration runs under
+ * @param name the integration name, for example `web`
  */
 export function createIntegrationLock(home: string, name: string): IntegrationLock {
   const file = path.join(home, 'integrations', `${assertIntegrationName(name)}.lock`);
   const guard = `${file}.reclaim`;
-  /** @type {'new' | 'acquiring' | 'owned' | 'retired'} */
   let phase: 'new' | 'acquiring' | 'owned' | 'retired' = 'new';
-  /** This instance's lock while it owns it: the lifetime nonce and the file's identity. @type {{ owner: string, dev: number, ino: number } | undefined} */
+  /** This instance's lock while it owns it: the lifetime nonce and the file's identity. */
   let owned: { owner: string, dev: number, ino: number } | undefined;
-  /** Serializes concurrent in-process setReady calls to preserve FIFO order. @type {Promise<any>} */
+  /** Serializes concurrent in-process setReady calls to preserve FIFO order. */
   let readyQueue: Promise<unknown> = Promise.resolve();
   // The lock file as read: its record and the stats of the handle it was read through. Kept inside
   // the factory so the published declarations name only IntegrationLock and its record.
   // any: the lock file's JSON as parsed, before complete() checks it
   type Snapshot = { value: any, info: Stats };
-  /** @param {string} reason */
   const recovery = (reason: string) => new Error(`${reason}. Stop ALL integration processes using this ALP_HOME before manual lock-only recovery of ${file} and ${guard}; see docs/modular-monorepo.md`);
 
-  /**
-   * @template T
-   * @param {() => Promise<T>} run
-   * @returns {Promise<T>}
-   */
   async function guarded<T>(run: () => Promise<T>): Promise<T> {
     await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
     const deadline = Date.now() + 20_000;
@@ -83,7 +67,6 @@ export function createIntegrationLock(home: string, name: string): IntegrationLo
     }
   }
 
-  /** @returns {Promise<Snapshot | undefined>} */
   async function snapshot(): Promise<Snapshot | undefined> {
     let handle;
     try { handle = await open(file, 'r'); }
@@ -97,10 +80,6 @@ export function createIntegrationLock(home: string, name: string): IntegrationLo
     } finally { await handle.close(); }
   }
 
-  /**
-   * @param {any} value
-   * @returns {value is IntegrationLockRecord}
-   */
   function complete(value: any): value is IntegrationLockRecord { // any: a parsed lock record, checked here field by field
     return value && Number.isSafeInteger(value.pid) && value.pid > 0
       && typeof value.bootTime === 'number' && Number.isFinite(value.bootTime) && value.bootTime > 0
@@ -112,10 +91,6 @@ export function createIntegrationLock(home: string, name: string): IntegrationLo
         || value.lockVersion === 1 && typeof value.owner === 'string' && /^[a-f0-9-]{36}$/.test(value.owner));
   }
 
-  /**
-   * @param {IntegrationLockRecord} value
-   * @returns {boolean}
-   */
   function dead(value: IntegrationLockRecord): boolean {
     try { process.kill(value.pid, 0); return false; }
     catch (error) {
@@ -126,10 +101,6 @@ export function createIntegrationLock(home: string, name: string): IntegrationLo
     }
   }
 
-  /**
-   * @param {Snapshot | undefined} current
-   * @returns {boolean}
-   */
   function matches(current: Snapshot | undefined): boolean {
     return !!owned && current?.value?.owner === owned.owner
       && current.info.dev === owned.dev && current.info.ino === owned.ino;
@@ -148,7 +119,6 @@ export function createIntegrationLock(home: string, name: string): IntegrationLo
             await unlink(file);
           }
           const currentBootId = bootId();
-          /** @type {IntegrationLockRecord & { owner: string }} */
           const value = {
             pid: process.pid,
             bootTime: bootTime(),

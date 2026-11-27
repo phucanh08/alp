@@ -10,10 +10,6 @@ export class Cancelled extends Error {
 /**
  * A select box in the terminal: ↑/↓ (or k/j) move, Enter picks, Ctrl-C or Esc cancels.
  * Choices are { label, value, hint? }; `initial` is the value highlighted first.
- * @template T
- * @param {{ message: string, choices: Array<{ label: string, value: T, hint?: string }>, initial?: T }} question
- * @param {{ input?: NodeJS.ReadStream, output?: NodeJS.WriteStream }} [io]
- * @returns {Promise<T>}
  */
 export function select<T>({ message, choices, initial }: { message: string, choices: Array<{ label: string, value: T, hint?: string }>, initial?: T }, { input = process.stdin, output = process.stdout }: { input?: NodeJS.ReadStream, output?: NodeJS.WriteStream } = {}): Promise<T> {
   let index = Math.max(0, choices.findIndex(choice => choice.value === initial));
@@ -52,11 +48,7 @@ export function select<T>({ message, choices, initial }: { message: string, choi
   });
 }
 
-/**
- * A line of text, for a value the list does not offer.
- * @param {string} message
- * @param {{ input?: NodeJS.ReadStream, output?: NodeJS.WriteStream }} [io]
- */
+/** A line of text, for a value the list does not offer. */
 export async function text(message: string, { input = process.stdin, output = process.stdout }: { input?: NodeJS.ReadStream, output?: NodeJS.WriteStream } = {}) {
   const { createInterface } = await import('node:readline/promises');
   const rl = createInterface({ input, output });

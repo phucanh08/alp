@@ -5,9 +5,6 @@ export const MAX_TIMER_MS = 2_147_483_647;
  * A timeout option as a setTimeout delay. `undefined` means no timer: no timeout given, Infinity,
  * or a wait longer than any timer can (about 24.8 days). Anything that is not a non-negative
  * number is a TypeError, so a typo cannot turn into an instant timeout.
- * @param {unknown} value
- * @param {string} [name]
- * @returns {number | undefined}
  */
 export function timerDelay(value: unknown, name = 'timeoutMs'): number | undefined {
   if (value === undefined || value === Infinity) return undefined;

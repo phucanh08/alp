@@ -4,7 +4,7 @@
  * Message transports such as a WebSocket carry whole frames and need none of this.
  */
 
-/** UTF-8 length of `text` without Buffer or TextEncoder; an unpaired surrogate counts as U+FFFD (3 bytes). @param {string} text */
+/** UTF-8 length of `text` without Buffer or TextEncoder; an unpaired surrogate counts as U+FFFD (3 bytes). */
 export function utf8Length(text: string): number {
   let bytes = 0;
   for (let index = 0; index < text.length; index++) {
@@ -22,11 +22,8 @@ export function utf8Length(text: string): number {
  * lines skipped, and throws once a frame (complete or still arriving) exceeds `maxFrame` bytes;
  * the decoder is unusable after that. Each character is measured once, so a frame that arrives
  * in many chunks costs linear time.
- * @param {{ maxFrame: number }} options
- * @returns {{ push(chunk: string): string[], readonly buffered: number }}
  */
 export function createLineDecoder({ maxFrame }: { maxFrame: number }): { push(chunk: string): string[], readonly buffered: number } {
-  /** @type {string[]} */
   let parts: string[] = [];
   let bytes = 0;
   let failed = false;
@@ -34,7 +31,6 @@ export function createLineDecoder({ maxFrame }: { maxFrame: number }): { push(ch
   return {
     push(chunk: string) {
       if (failed) throw new RangeError('Line decoder already failed');
-      /** @type {string[]} */
       const frames: string[] = [];
       let start = 0;
       for (let index = chunk.indexOf('\n'); index >= 0; index = chunk.indexOf('\n', start)) {

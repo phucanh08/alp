@@ -22,19 +22,12 @@ export type SocketTransportOptions = { maxFrame?: number, maxBufferedBytes?: num
 /**
  * Wraps a connected or still-connecting socket (writes made while it connects are queued by
  * Node). The transport owns the socket from then on.
- * @param {import('node:net').Socket} socket
- * @param {SocketTransportOptions} [options]
- * @returns {AlpTransport}
  */
 export function createSocketTransport(socket: Socket, { maxFrame = MAX_FRAME, maxBufferedBytes = 4 * MAX_FRAME }: SocketTransportOptions = {}): AlpTransport {
   const decoder = createLineDecoder({ maxFrame });
-  /** @type {Set<(frame: string) => void>} */
   const messages = new Set<(frame: string) => void>();
-  /** @type {Set<(close: TransportClose) => void>} */
   const closes = new Set<(close: TransportClose) => void>();
-  /** @type {TransportClose | undefined} */
   let ended: TransportClose | undefined;
-  /** @param {TransportClose} close */
   const end = (close: TransportClose) => {
     if (ended) return;
     ended = close;
@@ -44,7 +37,6 @@ export function createSocketTransport(socket: Socket, { maxFrame = MAX_FRAME, ma
     closes.clear();
     for (const listener of listeners) listener(close);
   };
-  /** @param {string} chunk */
   const onData = (chunk: string) => {
     if (ended) return;
     let frames: string[];
