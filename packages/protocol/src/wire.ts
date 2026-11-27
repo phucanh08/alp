@@ -108,8 +108,11 @@ export const TERMINAL_LIMIT_KEYS = Object.freeze(['maxPerPrincipal', 'maxPerDaem
  * characters. One pattern for `principal.agent` in daemon.hello and a gateway credential's agent.
  */
 export const AGENT_NAME = /^[a-z](?:[a-z0-9]|-(?=[a-z0-9])){0,63}$/;
-/** An opaque terminal id (§12.10). */
-export const isTerminalId = (id: unknown): id is string => typeof id === 'string' && /^term_[0-9a-f]{32}$/.test(id);
+/**
+ * An opaque terminal id (§12.10). The guard narrows to `term_${string}`, not `string`, so a `string`
+ * that fails the check stays `string` rather than narrowing to `never`.
+ */
+export const isTerminalId = (id: unknown): id is `term_${string}` => typeof id === 'string' && /^term_[0-9a-f]{32}$/.test(id);
 /** Room an attachment.chunk request needs besides its base64 data. */
 export const ATTACHMENT_CHUNK_OVERHEAD = 64 * 1024;
 /**
