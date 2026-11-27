@@ -236,7 +236,7 @@ alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, t
 ### 4.3 Bí mật không lọt ra ngoài
 
 - Log dùng logger redaction của `@anhlp/alp-core/log`, thêm một lượt scrub token, ticket và
-  subprotocol (`src/log.js`).
+  subprotocol (`src/log.ts`).
 - Field log dùng `principal` (id credential), không bao giờ dùng secret.
 - Lỗi trả về client không chứa token.
 - Cấu hình library có thể chứa secret mà alpd không redact (token trong URL MCP, args, lệnh hook,
@@ -1067,7 +1067,7 @@ Quyết định (main, theo quyền người dùng, 2026-11-21): ALP.app và `al
 - **Không phải owner**: method `owner` trả **đúng** lỗi của method denied: `-32601`, message
   `<method> is not available through the gateway`, `data.reason` `not_exposed`; alpd không nhận gì.
 - **Trả lời**: method `owner` được handler owner cùng tên trả lời (chạy trong process dashboard, bằng
-  user; `packages/cli/src/dashboard/owner/`, chữ ký trong `owner/index.js`), nếu không thì chuyển tới alpd
+  user; `packages/cli/src/dashboard/owner/`, chữ ký trong `owner/index.ts`), nếu không thì chuyển tới alpd
   với đúng các `params` mà entry liệt kê. Method đầu tiên: `daemon.usage { refresh }`; trang Settings › Usage
   dùng nó cho host owner (dashboard.md §4.7); với mọi client khác trang vẫn là bảng "not available". Method owner của alpd
   phải có schema trong `methods-v1.json` (params được kiểm trước khi tới alpd). Method riêng của gateway
