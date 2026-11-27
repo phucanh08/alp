@@ -958,5 +958,7 @@ test('host directories: a word scans at most HOST_DIRECTORIES.scanned directorie
   await writeFile(path.join(parent, 'one-more'), '');
   const over = await searchHostDirectories(`${parent}/pi`, { home });
   assert.equal(over.truncated, true, `${HOST_DIRECTORIES.listed + 1} entries: truncated`);
-  assert.ok(over.entries.length <= 1);
+  // Which entries a cut-off read saw depends on the directory's read order; it is never more than the one
+  // directory there, and never a file.
+  assert.ok(over.entries.every(entry => entry.path === path.join(parent, 'pick')), JSON.stringify(over.entries));
 });
