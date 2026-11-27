@@ -20,10 +20,6 @@ type AcpSessionNew = { configOptions?: AcpConfigOption[], models?: { availableMo
  * a provider that needs a login usually says so here, in authMethods. With `discover`,
  * it also opens a session in `cwd`, as Paseo does, to read the models and modes the agent
  * offers (ALPD §65); an agent that offers none leaves them out.
- * @param {{ command: string, args?: string[], env?: Record<string, string>, label?: string, id?: string }} provider
- * @param {{ cwd?: string, timeoutMs?: number, discover?: boolean, signal?: AbortSignal }} [options]
- * @returns {Promise<{ protocolVersion: number, agent?: { name?: string, title?: string, version?: string }, loadSession: boolean, mcpHttp: boolean, authMethods: string[],
- *   models?: Array<{ id: string, label: string, description?: string }>, currentModel?: string, modes?: Array<{ id: string, label: string, description?: string }>, currentMode?: string }>}
  */
 export async function probeAcp(provider: AcpProvider, { cwd, timeoutMs = 20_000, discover = false, signal }: { cwd?: string, timeoutMs?: number, discover?: boolean, signal?: AbortSignal } = {}): Promise<AcpProbe> {
   signal?.throwIfAborted();

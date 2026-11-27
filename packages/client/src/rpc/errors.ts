@@ -30,16 +30,10 @@ export type ClientErrorReason = 'closed' | 'disconnected' | 'protocol' | 'send_f
 export class AlpClientError extends Error {
   declare reason: ClientErrorReason;
   declare data: unknown;
-  /**
-   * @param {string} message
-   * @param {{ reason: 'closed' | 'disconnected' | 'protocol' | 'send_failed' | 'timeout' | 'aborted' | 'overloaded', cause?: unknown, data?: unknown }} details
-   */
   constructor(message: string, { reason, cause, data }: { reason: ClientErrorReason, cause?: unknown, data?: unknown }) {
     super(message, cause === undefined ? undefined : { cause });
     this.name = 'AlpClientError';
-    /** @type {'closed' | 'disconnected' | 'protocol' | 'send_failed' | 'timeout' | 'aborted' | 'overloaded'} */
     this.reason = reason;
-    /** @type {unknown} */
     this.data = data;
     Object.defineProperty(this, BRAND, { value: true });
   }
@@ -48,9 +42,6 @@ export class AlpClientError extends Error {
 /**
  * True for an AlpClientError, also one thrown by another copy of this module (a bundle may carry
  * two); `reason` narrows the check.
- * @param {unknown} error
- * @param {string} [reason]
- * @returns {error is AlpClientError}
  */
 export function isAlpClientError(error: unknown, reason?: string): error is AlpClientError {
   // any: the brand is a symbol property a foreign copy of this class sets; no declared type has it.

@@ -19,7 +19,6 @@ export type RpcSession = {
  * Starts an MCP server once and lists its tools (ALPD §43), for the Test button and
  * `alp mcp test`. `server` is a normalized definition: { command, args, env, cwd } for
  * stdio, or { url, headers } for HTTP. The server is stopped afterwards.
- * @returns {Promise<{ server?: { name?: string, version?: string }, tools: Array<{ name: string, description?: string }> }>}
  */
 export async function probeMcp(server: McpServer, { cwd, timeoutMs = 15_000 }: { cwd?: string, timeoutMs?: number } = {}): Promise<{ server?: { name?: string, version?: string }, tools: Array<{ name: string, description?: string }> }> {
   const session = server.url ? await httpSession(server, timeoutMs) : stdioSession(server, cwd, timeoutMs);

@@ -51,10 +51,9 @@ const CLOSED = 'ALP daemon connection closed';
 /** Requests waiting for an answer at once; beyond it a request fails as `overloaded` and is not sent. */
 export const DEFAULT_MAX_PENDING = 4096;
 
-/** A listener's exception must not break dispatch to the others; it surfaces like an uncaught error. @param {unknown} error */
+/** A listener's exception must not break dispatch to the others; it surfaces like an uncaught error. */
 const rethrow = (error: unknown) => { setTimeout(() => { throw error; }, 0); };
 
-/** @param {AlpTransport} transport */
 function assertTransport(transport: AlpTransport) {
   for (const name of ['send', 'onMessage', 'onClose', 'close']) {
     // any: the check is for callers that pass something that is not a transport at all.
@@ -62,32 +61,26 @@ function assertTransport(transport: AlpTransport) {
   }
 }
 
-/** @param {AbortSignalLike} signal */
 const abortError = (signal: AbortSignalLike) => new AlpClientError('ALP request aborted', { reason: 'aborted', cause: signal.reason });
 
-/** @param {object} value @param {string} key */
 const own = (value: object, key: string) => Object.prototype.hasOwnProperty.call(value, key);
 
 export class AlpRpcClient {
-  /** @type {AlpTransport} */ #transport: AlpTransport;
+  #transport: AlpTransport;
   #sequence = 0;
-  /** @type {Map<number, { resolve(value: unknown): void, reject(error: unknown): void, cleanup(): void }>} */
   #pending = new Map<number, { resolve(value: unknown): void, reject(error: unknown): void, cleanup(): void }>();
-  /** @type {Set<(envelope: any) => void>} */ #events = new Set<(envelope: any /* any: daemon JSON whose shape depends on the event */) => void>();
-  /** @type {Set<(method: string, params: any) => void>} */ #notifications = new Set<(method: string, params: any /* any: depends on the method */) => void>();
-  /** @type {Set<(error: Error) => void>} */ #closes = new Set<(error: Error) => void>();
-  /** @type {Set<(method: string, params: any) => unknown>} */ #requestHandlers = new Set<(method: string, params: any /* any: depends on the method */) => unknown>();
-  /** @type {Array<() => void>} */ #detach: Array<() => void> = [];
-  /** @type {AlpClientError | undefined} */ #closeError: AlpClientError | undefined;
+  #events = new Set<(envelope: any /* any: daemon JSON whose shape depends on the event */) => void>();
+  #notifications = new Set<(method: string, params: any /* any: depends on the method */) => void>();
+  #closes = new Set<(error: Error) => void>();
+  #requestHandlers = new Set<(method: string, params: any /* any: depends on the method */) => unknown>();
+  #detach: Array<() => void> = [];
+  #closeError: AlpClientError | undefined;
   #maxPending: number;
   #maxFrame: number;
   #timeoutMs: number | undefined;
   #onListenerError: (error: unknown) => void;
 
-  /**
-   * @param {AlpTransport} transport an open transport; the client owns it from now on
-   * @param {AlpRpcClientOptions} [options]
-   */
+  /** @param transport an open transport; the client owns it from now on */
   constructor(transport: AlpTransport, { maxPending = DEFAULT_MAX_PENDING, maxFrame = MAX_FRAME, timeoutMs, onListenerError = rethrow }: AlpRpcClientOptions = {}) {
     assertTransport(transport);
     this.#transport = transport;
@@ -110,17 +103,11 @@ export class AlpRpcClient {
    * Sends one request and resolves with its result, or rejects with AlpRpcError (the daemon
    * answered with an error) or AlpClientError (the client gave up: see CLIENT_ERROR). Requests are
    * never resent, also not after a reconnect.
-   * @template [T=any]
-   * @param {string} method
-   * @param {unknown} [params]
-   * @param {RequestOptions} [options]
-   * @returns {Promise<T>}
    */
   request<T = any>(method: string, params: unknown = {}, { signal, timeoutMs = this.#timeoutMs }: RequestOptions = {}): Promise<T> { // any: the caller names the result type (JSDoc template default)
     if (this.#closeError) return Promise.reject(new AlpClientError(CLOSED, { reason: this.#closeError.reason === 'closed' ? 'closed' : 'disconnected', cause: this.#closeError }));
     if (signal?.aborted) return Promise.reject(abortError(signal));
     if (this.#pending.size >= this.#maxPending) return Promise.reject(new AlpClientError(`Too many ALP requests waiting for an answer (${this.#maxPending})`, { reason: 'overloaded' }));
-    /** @type {number | undefined} */
     let delay: number | undefined;
     try { delay = timerDelay(timeoutMs); } catch (error) { return Promise.reject(error); }
     const id = ++this.#sequence;
@@ -129,7 +116,6 @@ export class AlpRpcClient {
     // The limit counts the newline a stream transport adds, as alpd counts it.
     if (utf8Length(frame) >= this.#maxFrame) return Promise.reject(new AlpClientError(`ALP request ${method} exceeds the ${this.#maxFrame}-byte frame limit`, { reason: 'send_failed' }));
     return new Promise<T>((resolve, reject) => {
-      /** @type {ReturnType<typeof setTimeout> | undefined} */
       let timer: ReturnType<typeof setTimeout> | undefined;
       const onAbort = () => { if (this.#pending.delete(id)) { cleanup(); reject(abortError(signal as AbortSignalLike)); } };
       const cleanup = () => {
@@ -160,20 +146,19 @@ export class AlpRpcClient {
     });
   }
 
-  /** Every `event` notification: an envelope of a session the connection attached to. Returns a remover. @param {(envelope: any) => void} listener */
+  /** Every `event` notification: an envelope of a session the connection attached to. Returns a remover. */
   onEvent(listener: (envelope: any /* any: an event envelope's payload depends on the session's event type */) => void) { return this.#add(this.#events, listener); }
 
-  /** Every notification from the daemon, `event` included; for methods this client does not know yet. @param {(method: string, params: any) => void} listener */
+  /** Every notification from the daemon, `event` included; for methods this client does not know yet. */
   onNotification(listener: (method: string, params: any /* any: notification params depend on the method */) => void) { return this.#add(this.#notifications, listener); }
 
   /**
    * Answers requests the daemon sends this client (the extension RPC of ALPD §61). The first
    * handler answers; its result, or its error's numeric `code`, `message` and `data`, goes back.
-   * @param {(method: string, params: any) => unknown} handler
    */
   onRequest(handler: (method: string, params: any /* any: request params depend on the method */) => unknown) { return this.#add(this.#requestHandlers, handler); }
 
-  /** Called once when the connection ends, with the error pending requests were rejected with. @param {(error: Error) => void} listener */
+  /** Called once when the connection ends, with the error pending requests were rejected with. */
   onClose(listener: (error: Error) => void) { return this.#add(this.#closes, listener); }
 
   /** Ends the connection; waiting requests reject with reason `closed`. Idempotent. */
@@ -182,7 +167,6 @@ export class AlpRpcClient {
     this.#finish(new AlpClientError(CLOSED, { reason: 'closed' }));
   }
 
-  /** @template F @param {Set<F>} set @param {F} listener */
   #add<F>(set: Set<F>, listener: F) {
     if (typeof listener !== 'function') throw new TypeError('ALP client listener must be a function');
     if (this.#closeError) return () => false;
@@ -190,24 +174,20 @@ export class AlpRpcClient {
     return () => set.delete(listener);
   }
 
-  /** @param {TransportClose} [close] */
   #disconnected(close: TransportClose = {}) {
     if (close.error instanceof AlpClientError) return close.error;
     const data = close.code !== undefined || close.reason ? { code: close.code, reason: close.reason } : undefined;
     return new AlpClientError(close.error?.message ?? CLOSED, { reason: 'disconnected', cause: close.error, data });
   }
 
-  /** @param {string} message */
   #violation(message: string) {
     this.#finish(new AlpClientError(message, { reason: 'protocol' }));
   }
 
-  /** @param {Function} listener @param {unknown[]} args */
   #call(listener: Function, ...args: unknown[]) {
     try { listener(...args); } catch (error) { this.#onListenerError(error); }
   }
 
-  /** @param {string} frame */
   #receive(frame: string) {
     if (this.#closeError) return;
     if (typeof frame !== 'string') return this.#violation('Invalid frame from ALP daemon');
@@ -241,17 +221,15 @@ export class AlpRpcClient {
    * Answers a request from alpd. Every request gets exactly one answer: a result that cannot be
    * serialized or does not fit a frame becomes an error, and an error whose data cannot go either
    * goes without it, so alpd's caller never waits for a reply that was silently dropped.
-   * @param {unknown} id @param {string} method @param {unknown} params
    */
   #answer(id: unknown, method: string, params: unknown) {
-    /** The frame for `body`, or undefined if it cannot be serialized or is over the limit. @param {object} body */
+    /** The frame for `body`, or undefined if it cannot be serialized or is over the limit. */
     const frameOf = (body: object) => {
       try {
         const frame = JSON.stringify({ jsonrpc: '2.0', id, ...body });
         return utf8Length(frame) < this.#maxFrame ? frame : undefined;
       } catch { return undefined; }
     };
-    /** @param {string | undefined} frame */
     const send = (frame: string | undefined) => {
       if (this.#closeError) return;
       if (frame === undefined) return this.#finish(new AlpClientError('ALP reply exceeds the frame limit', { reason: 'protocol' }));
@@ -259,7 +237,6 @@ export class AlpRpcClient {
         this.#finish(new AlpClientError('Could not send ALP reply', { reason: 'send_failed', cause }));
       }
     };
-    /** @param {unknown} error */
     const failure = (error: unknown) => {
       // any: a handler may throw anything; a numeric `code` and a `data` field are used when present.
       const code = (error && typeof (error as any).code === 'number') ? (error as any).code : 1000;
@@ -282,7 +259,6 @@ export class AlpRpcClient {
     });
   }
 
-  /** @param {AlpClientError} error */
   #finish(error: AlpClientError) {
     if (this.#closeError) return;
     this.#closeError = error;

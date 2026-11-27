@@ -134,7 +134,6 @@ const CLI_PACKAGES = ['@anhlp/alp', '@anhlp/alp-cli'];
  * (<bundle>/bin/alp or alp.cmd, t-1807; its native alpd when it ships one, t-81b0.9, else its alpd.js), npm's @anhlp/alp-cli (dist/cli.js) or the @anhlp/alp wrapper (bin/alp.js),
  * which depends on @anhlp/alp-cli (installed beside it, or in its own node_modules). On Windows an
  * alp.cmd shim of npm or install.ps1 is followed to the script it runs (t-1f14).
- * @param {string} cli @param {number} [depth] @param {NodeJS.ProcessEnv} [env]
  */
 async function cliDaemonEntry(cli: string, depth = 0, env: NodeJS.ProcessEnv = process.env): Promise<string | undefined> {
   const base = path.basename(cli).toLowerCase();
@@ -176,7 +175,7 @@ async function cliDaemonEntry(cli: string, depth = 0, env: NodeJS.ProcessEnv = p
  * recorded itself ($ALP_HOME/alpd.json), then the ALP CLI (`alp`) on PATH and in the usual install
  * directories (`binDirectories`; a test passes [] so the caller's own install is not found).
  */
-export async function findDaemonEntry({ home = alpHome(), env = process.env, candidates = /** @type {Array<string | undefined>} */ ([]), binDirectories = BIN_DIRECTORIES }: { home?: string, env?: NodeJS.ProcessEnv, candidates?: Array<string | undefined>, binDirectories?: string[] } = {}): Promise<string | undefined> {
+export async function findDaemonEntry({ home = alpHome(), env = process.env, candidates = [], binDirectories = BIN_DIRECTORIES }: { home?: string, env?: NodeJS.ProcessEnv, candidates?: Array<string | undefined>, binDirectories?: string[] } = {}): Promise<string | undefined> {
   for (const candidate of candidates) if (candidate && await isFile(candidate)) return candidate;
   try {
     const { entry } = JSON.parse(await readFile(daemonPaths(home).install, 'utf8'));
@@ -195,8 +194,6 @@ export async function findDaemonEntry({ home = alpHome(), env = process.env, can
 /**
  * Integration names are single lowercase path segments: they name `<home>/integrations/<name>.lock`,
  * its guard and `<home>/<name>.json`. Returns the name, or throws a TypeError.
- * @param {unknown} name
- * @returns {string}
  */
 export function assertIntegrationName(name: unknown): string {
   if (typeof name !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new TypeError(`Invalid integration name: ${JSON.stringify(name)}`);
@@ -211,8 +208,6 @@ let cachedBootId: string | undefined | null = null;
  *
  * On Linux, reads /proc/sys/kernel/random/boot_id.
  * On Darwin (macOS), queries sysctl kern.bootsessionuuid.
- *
- * @returns {string | undefined}
  */
 export function bootId(): string | undefined {
   if (cachedBootId !== null) return cachedBootId;
@@ -241,10 +236,7 @@ export function bootId(): string | undefined {
   return cachedBootId;
 }
 
-/**
- * Internal/testing seam: resets or sets the cached boot identifier.
- * @param {string | undefined | null} [id]
- */
+/** Internal/testing seam: resets or sets the cached boot identifier. */
 export function _setBootIdForTest(id: string | undefined | null = null): void {
   cachedBootId = id;
 }
@@ -263,10 +255,6 @@ export function bootTime(): number {
  *
  * For legacy locks or environments without a bootId, falls back to checking
  * whether wall-clock bootTime is within a 30-second window.
- *
- * @param {{ bootId?: string, bootTime?: number }} [lock]
- * @param {{ bootId?: string, bootTime?: number }} [current]
- * @returns {boolean}
  */
 export function isSameBoot(lock?: { bootId?: string, bootTime?: number } | null, { bootId: curBootId = bootId(), bootTime: curBootTime = bootTime() }: { bootId?: string, bootTime?: number } = {}): boolean {
   if (!lock) return false;
@@ -337,8 +325,6 @@ export function lockAlive(lock: LiveLock | null | undefined, { platform = proces
  * Takes alpd's single-instance lock for `home`: exclusive create; a lock whose pid or boot is
  * gone is stale and replaced. alpd takes it to run; `alp backup` and `alp restore` take it with
  * `maintenance` set, so no alpd starts on data they read or replace (ALPD §68).
- * @param {string} home
- * @param {{ version: string, protocolVersion: number, socket: string, maintenance?: string }} contents
  */
 export async function acquireDaemonLock(home: string, contents: DaemonLockContents, { platform = process.platform, ops = holdOps }: { platform?: NodeJS.Platform, ops?: HoldOps } = {}): Promise<DaemonLock> {
   const { lock: file, hold } = daemonPaths(home);
@@ -439,27 +425,22 @@ export async function releaseDaemonLock(home: string): Promise<void> {
  * CLI, alpd's tests and the Paseo plugin use.
  */
 export class AlpClient extends AlpRpcClient {
-  /** Host features captured by connect's handshake. @type {readonly string[]} */
+  /** Host features captured by connect's handshake. */
   capabilities: readonly string[] = [];
-  /** Limits captured by connect's handshake. @type {import('@anhlp/alp-protocol').AttachmentLimits | undefined} */
+  /** Limits captured by connect's handshake. */
   attachmentLimits: AttachmentLimits | undefined;
-  /** @type {{ readonly maxCount: number; readonly maxBytes: number; readonly maxTotalBytes: number } | undefined} */
   promptImageLimits: { readonly maxCount: number; readonly maxBytes: number; readonly maxTotalBytes: number } | undefined;
-  /** @type {import('@anhlp/alp-protocol').TerminalLimits | undefined} */
   terminalLimits: TerminalLimits | undefined;
-  /**
-   * @param {import('node:net').Socket} socket a connected or connecting socket; the client owns it
-   * @param {import('./rpc/client.js').AlpRpcClientOptions & import('./connection/ipc.js').SocketTransportOptions} [options]
-   */
+  /** @param socket a connected or connecting socket; the client owns it */
   constructor(socket: Socket, { maxFrame, maxBufferedBytes, ...options }: AlpClientOptions = {}) {
     super(createSocketTransport(socket, { maxFrame, maxBufferedBytes }), { maxFrame, ...options });
   }
 }
 
-/** A socket to alpd, once it is checked to be private to this user (the IPC checks above). @param {string} socketPath */
+/** A socket to alpd, once it is checked to be private to this user (the IPC checks above). */
 async function openSocket(socketPath: string): Promise<Socket> {
   await assertPrivateSocket(socketPath);
-  return /** @type {Promise<import('node:net').Socket>} */ (new Promise((resolve, reject) => {
+  return (new Promise((resolve, reject) => {
     const candidate = net.createConnection(socketPath);
     candidate.once('connect', () => { candidate.off('error', reject); resolve(candidate); });
     candidate.once('error', reject);
@@ -469,20 +450,12 @@ async function openSocket(socketPath: string): Promise<Socket> {
 /**
  * The transport to alpd's socket without the handshake, for an AlpRpcClient or a reconnecting
  * client whose onConnect runs `hello`. `connect` is this plus `hello`.
- * @param {string} socketPath
- * @param {import('./connection/ipc.js').SocketTransportOptions} [options]
  */
 export async function connectSocket(socketPath: string, options?: SocketTransportOptions) {
   return createSocketTransport(await openSocket(socketPath), options);
 }
 
-/**
- * Connects and performs the version handshake.
- * @param {string} socketPath
- * @param {{ name: string, version: string }} [client]
- * @param {import('./rpc/client.js').AlpRpcClientOptions & import('./connection/ipc.js').SocketTransportOptions} [options]
- * @returns {Promise<AlpClient>}
- */
+/** Connects and performs the version handshake. */
 export async function connect(socketPath: string, client: { name: string, version: string } = { name: 'alp', version: '0' }, options: AlpClientOptions = {}): Promise<AlpClient> {
   const connection = new AlpClient(await openSocket(socketPath), options);
   try {
@@ -613,7 +586,6 @@ export async function readDaemonLifecycle(home: string, { platform = process.pla
  * How long a start or stop waits behind one unchanged holder of the lifecycle before it gives up:
  * twice the start timeout (a start waits that long for its launcher and again for readiness) and
  * half a minute, so 150 s by default. A holder that finishes sooner is never cut short.
- * @param {NodeJS.ProcessEnv} [env]
  */
 export function daemonLifecycleWaitMs(env: NodeJS.ProcessEnv = process.env): number {
   return 2 * daemonStartTimeoutMs(env) + 30_000;
@@ -630,7 +602,7 @@ export function daemonLifecycleWaitMs(env: NodeJS.ProcessEnv = process.env): num
  * holder at all, this rejects with ALP_LIFECYCLE_BUSY and says what to remove. It never takes the
  * lifecycle from a holder it cannot show to be gone.
  */
-export async function withDaemonLifecycle<T>(home: string, action: 'start' | 'stop', run: () => T | Promise<T>, { joinStart = false, signal = /** @type {AbortSignal | undefined} */ (undefined), waitMs = daemonLifecycleWaitMs(), platform = process.platform, ops = holdOps }: { joinStart?: boolean, signal?: AbortSignal, waitMs?: number, platform?: NodeJS.Platform, ops?: HoldOps } = {}): Promise<T> {
+export async function withDaemonLifecycle<T>(home: string, action: 'start' | 'stop', run: () => T | Promise<T>, { joinStart = false, signal = undefined, waitMs = daemonLifecycleWaitMs(), platform = process.platform, ops = holdOps }: { joinStart?: boolean, signal?: AbortSignal, waitMs?: number, platform?: NodeJS.Platform, ops?: HoldOps } = {}): Promise<T> {
   signal?.throwIfAborted();
   try {
     await assertPrivateDirectory(home, { create: true });
@@ -748,7 +720,6 @@ const DAEMON_START_TIMEOUT_MAX_MS = 3_600_000;
 /**
  * The time a start of alpd waits for it to become ready, in ms: ALP_DAEMON_START_TIMEOUT_MS when it
  * is a positive whole number of at most one hour, else DAEMON_START_TIMEOUT_MS.
- * @param {NodeJS.ProcessEnv} [env]
  */
 export function daemonStartTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
   const raw = env.ALP_DAEMON_START_TIMEOUT_MS?.trim();
@@ -762,7 +733,7 @@ export function daemonStartTimeoutMs(env: NodeJS.ProcessEnv = process.env): numb
  * `entry` is the daemon script; it is started through its own detaching launcher so the
  * daemon outlives the client that started it.
  */
-export async function ensureDaemon({ home = alpHome(), entry = /** @type {string | undefined} */ (undefined), env = process.env, execPath = process.execPath, timeoutMs = daemonStartTimeoutMs(env), lifecycleLocked = false, signal = /** @type {AbortSignal | undefined} */ (undefined) }: { home?: string, entry?: string, env?: NodeJS.ProcessEnv, execPath?: string, timeoutMs?: number, lifecycleLocked?: boolean, signal?: AbortSignal } = {}): Promise<string> {
+export async function ensureDaemon({ home = alpHome(), entry = undefined, env = process.env, execPath = process.execPath, timeoutMs = daemonStartTimeoutMs(env), lifecycleLocked = false, signal = undefined }: { home?: string, entry?: string, env?: NodeJS.ProcessEnv, execPath?: string, timeoutMs?: number, lifecycleLocked?: boolean, signal?: AbortSignal } = {}): Promise<string> {
   signal?.throwIfAborted();
   if (!lifecycleLocked) return withDaemonLifecycle(home, 'start', () => ensureDaemon({ home, entry, env, execPath, timeoutMs, lifecycleLocked: true, signal }), { signal });
   const ready = async () => {
@@ -876,8 +847,6 @@ async function distributionRoots() {
  * `alp-web-integration` binary, `ALP_WEB_INTEGRATION`) is the Paseo integration from before its
  * rename to `paseo`, which must never run under the web lock. `ALP_WEB_INTEGRATION` is read for
  * `paseo` only, after `ALP_PASEO_INTEGRATION`, for one release (like the alp-web-integration alias).
- * @param {string} [name]
- * @param {{ home?: string, env?: NodeJS.ProcessEnv, binDirectories?: string[], roots?: string[] }} [options]
  */
 export async function discoverIntegration(name: string = 'dashboard', options: { home?: string, env?: NodeJS.ProcessEnv, binDirectories?: string[], roots?: string[] } = {}): Promise<string | undefined> {
   // The name becomes a descriptor path under <home>/integrations, so it must stay one safe segment.
@@ -926,8 +895,6 @@ export function integrationAlive(lock: LiveLock | null | undefined): boolean {
 /**
  * What startIntegration says about integration `name`, and where its service writes its log: alp
  * dashboard (`dashboard`) is part of the CLI, Paseo (`paseo`) an optional package, anything else named as is.
- * @param {string} name
- * @param {string} home
  */
 function integrationText(name: string, home: string) {
   const logs = path.join(home, 'logs', 'integrations');
@@ -954,7 +921,6 @@ function integrationText(name: string, home: string) {
  * pid. `entry` names the script to run with this Node and skips descriptor, environment and PATH
  * discovery; `dashboard` is never discovered, so it needs its entry. `"dashboard": { "enabled": false }`
  * in the home's settings.json (or `web.enabled`, its key before the rename) refuses `dashboard` only.
- * @param {string | { name?: string, entry?: string, home?: string, args?: string[] }} [nameOrOptions]
  */
 export async function startIntegration(nameOrOptions: string | { name?: string, entry?: string, home?: string, args?: string[] } = 'dashboard') {
   const options: { name?: string, entry?: string, home?: string, args?: string[] } = typeof nameOrOptions === 'string' ? { name: nameOrOptions } : (nameOrOptions ?? {});

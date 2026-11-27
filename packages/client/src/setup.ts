@@ -144,7 +144,6 @@ async function change(seats: Seats, home: string): Promise<void> {
 
 /** Each seat's choices for the enabled providers: main on the preferred one, the others on each. */
 function seatsFor(enabled: string[], prefer: string, values: Record<string, string | undefined> = {}): Seats {
-  /** @type {Record<string, Array<{ provider: string, model: string, effort?: string }>>} */
   const seats: Seats = {};
   for (const [seat, flag] of Object.entries(FLAGS)) {
     seats[seat] = (seat === 'main' ? [prefer] : enabled).map(provider => {
@@ -165,7 +164,6 @@ const currentTeams = (settings: RawSettings | undefined): TeamsProfiles | undefi
 /** Each agent's profile list for one team, by its role: main, supervisor and oracle by seat, a peer on any model, the others as workers. */
 function teamProfiles(team: ResolvedTeam, seats: Seats, peers: string[]): Record<string, string[]> {
   const strings = (choices: Array<string | SeatChoice>) => choices.map(choice => typeof choice === 'string' ? choice : describe(choice));
-  /** @type {Record<string, string[]>} */
   const agents: Record<string, string[]> = {};
   for (const [name, member] of Object.entries(team.members)) {
     if (name !== 'oracle') agents[name] = strings(name === team.main ? seats.main : member.role === 'peer' ? peers : seats.worker);
@@ -234,9 +232,7 @@ async function ownership(root: string, home: string, existing: RawSettings | und
   const settings = existing ?? { team: initial, templateDefaults: profileDefaults(initial!) };
   const teams = currentTeams(settings) ?? {};
   const file = path.join(root, '.alp/settings.json');
-  /** @type {Record<string, Record<string, string[]>>} */
   const legacy: Record<string, Record<string, string[]>> = {};
-  /** @type {Record<string, Record<string, string>>} */
   const pinned: Record<string, Record<string, string>> = {};
   for (const id of BUILTIN_TEAMS) {
     const team = await resolveTeam(root, id, { library: home });
