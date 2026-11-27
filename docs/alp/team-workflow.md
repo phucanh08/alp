@@ -405,7 +405,7 @@ profile is:
   no such credentials where librarian runs if private code must stay out.
 
 `Bash(@git-read <root>)` allows each reading subcommand only the options on its allowlist
-(`GIT_OPTIONS` in `packages/core/src/permissions.js`), matched exactly: git accepts any
+(`GIT_OPTIONS` in `packages/core/src/permissions.ts`), matched exactly: git accepts any
 unambiguous abbreviation of a long option (`grep --open=sh` is `--open-files-in-pager`) and
 clusters of short ones (`grep -iOsh`), so an abbreviation, or a cluster with a letter not on the
 list, is refused. No listed option writes a file, runs a program or names a file to read
@@ -1558,6 +1558,12 @@ after the denial keeps the status `completed`, and `denied` still comes with it.
 runtimes report no denials and their results are unchanged. ALP does not retry the
 turn. The run log records each such turn as `turn.denied`. The task of a failed
 assignment returns to open, as for any failed assignment.
+
+**Skills of an Antigravity agent.** Library skills live in `$ALP_HOME/skills`, outside the
+workspace, so reading one by path would be such a denial. An Antigravity agent's skill list
+therefore names the `alp_skill_read {skill, file?}` tool instead of a path, and the agent
+opens its skills only through it; Claude and Codex agents keep the paths. What the tool
+returns and refuses is in [role-skills.md](role-skills.md#how-agents-see-their-skills).
 
 **Review verdicts.** A review ends in a fixed verdict, filed as the handoff's
 `verdict`:

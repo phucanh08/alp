@@ -461,7 +461,7 @@ Test: `test/integration/dashboard-process.test.ts` (hai test `t-81b0.4`: định
 Gateway trong `alp-dashboard` được tạo với option `owner` ([remote-gateway.md](remote-gateway.md) §5.19):
 credential của chính dashboard, trên kết nối tới thẳng từ loopback (`127.0.0.1`, `::1`), là **host
 owner** và được gọi các method `owner` của matrix, do alpd hoặc handler trong
-`packages/cli/src/dashboard/owner/` (`host.js`, `library.js`) trả lời. Owner được đọc lại mỗi request từ
+`packages/cli/src/dashboard/owner/` (`host.ts`, `library.ts`) trả lời. Owner được đọc lại mỗi request từ
 `grant.id`, nên sau `alp dashboard rotate` token cũ không còn là owner. Credential của `alp-gateway`
 riêng, thiết bị Paseo qua relay, proxy hay tunnel (có header chuyển tiếp) không bao giờ là owner và nhận
 đúng lỗi như trước (`-32601 not_exposed`). App biết mình là owner qua capability `host.owner` trong
@@ -508,7 +508,7 @@ alpd, không chép lại:
 với `windows[].id`/`label` theo Paseo (Claude: Session, Weekly, Weekly · <Model>; Codex: 5-hour, Weekly,
 <limitName> · <length>), `planLabel` (Claude `Max`, Codex `plus`), `details` (Extra usage
 Enabled/Disabled), `balances` (Credits của Codex) và `account: { email }`. `name` cũ giữ nguyên.
-Email chỉ có khi hỏi `account: true`, và chỉ handler `daemon.usage` của dashboard (host.js) hỏi: bridge
+Email chỉ có khi hỏi `account: true`, và chỉ handler `daemon.usage` của dashboard (`owner/host.ts`) hỏi: bridge
 Paseo (chuyển câu trả lời cho thiết bị đã ghép) và client cục bộ khác nhận `account: null`; email không
 vào `orchestrationContext` (catalog agent thấy), log hay lỗi.
 
@@ -536,7 +536,7 @@ detached, stdio ignore.
   `explorer.exe <dir>`, `xdg-open <dir>`). `ALP_DASHBOARD_FILE_MANAGER` (program tuyệt đối, trong env của
   `alp dashboard`) thay program đó và nhận `[dir]`. Không chạy được: 1000 `reveal_failed`.
 - `host.workspace.editors {}` → `{ editors: [{ id, label }] }`: các editor của bảng cố định `EDITORS`
-  (`owner/host.js`) đã cài trên host, theo thứ tự của bảng: `vscode` (Visual Studio Code), `cursor`,
+  (`owner/host.ts`) đã cài trên host, theo thứ tự của bảng: `vscode` (Visual Studio Code), `cursor`,
   `zed`, `xcode` (chỉ macOS), `intellij`, `webstorm`, `pycharm`, `goland`, `rider`, `clion`, `phpstorm`,
   `rubymine`, `android-studio`, và `finder` luôn có (label `Finder` trên macOS, `File Explorer` trên
   Windows, `File manager` nơi khác). Tìm ở chỗ cố định, không shell, không `which`: macOS là bundle `.app`

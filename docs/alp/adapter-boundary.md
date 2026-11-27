@@ -1,7 +1,7 @@
 # Adapter boundary
 
 > Written in an early phase, when core lived in `src/core`. The contract still holds; the files
-> are now `packages/core/src/types.d.ts` and `packages/core/src/adapter.d.ts`, and settings
+> are now `packages/core/src/types.ts` and `packages/core/src/adapter.ts`, and settings
 > accept much more than listed below (see [team-workflow.md](team-workflow.md)).
 
 `src/core/types.d.ts` defines the serializable `ResolvedAgent`; `adapter.d.ts` defines the compile-only adapter contract. `compileAgent()` validates IR and capabilities, hands a copy to the adapter, and checks its compiled envelope. Lifecycle belongs to the runtime integration, not this contract. Core imports only Node builtins and core modules.

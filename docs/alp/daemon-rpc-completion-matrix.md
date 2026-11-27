@@ -124,12 +124,12 @@ process riêng:
 
 | File | Lý do |
 |---|---|
-| `packages/protocol/schema/methods-v1.json`, `schema/ipc-v1.json` | method, `$defs`, lỗi, capability, `x-alp`; hai file phải có `$defs` giống hệt |
-| `packages/protocol/src/contract-v1.js` | sinh từ schema: chạy lại `node packages/protocol/scripts/generate.ts`, đừng merge tay |
-| `packages/protocol/fixtures/v1/cases.json` | sinh từ `scripts/fixtures.ts`: merge script rồi chạy lại |
-| `packages/protocol/src/wire.js` | `ERROR` (+1003, 1005), `CAPABILITY` (+4), `RPC_METHODS` |
+| `packages/protocol/schema/methods-v1.json`, `packages/protocol/schema/ipc-v1.json` | method, `$defs`, lỗi, capability, `x-alp`; hai file phải có `$defs` giống hệt |
+| `packages/protocol/src/contract-v1.ts` | sinh từ schema: chạy lại `node packages/protocol/scripts/generate.ts`, đừng merge tay |
+| `packages/protocol/fixtures/v1/cases.json` | sinh từ `packages/protocol/scripts/fixtures.ts`: merge script rồi chạy lại |
+| `packages/protocol/src/wire.ts` | `ERROR` (+1003, 1005), `CAPABILITY` (+4), `RPC_METHODS` |
 | `packages/protocol/src/rpc.ts`, `src/dto.ts` | kiểu method và DTO mới |
 | `docs/protocol/alp-json-rpc-v1.md` | §5, §6.2, §10, §12–§15 |
 | `packages/daemon/src/server.ts`, `src/main.ts` | `RpcError` chuyển sang `rpc-error.ts`; option `home`/`templates`; tên v1 dành riêng cho extension |
-| `packages/core/src/tasks.js`, `tasks.d.ts`, `task-rows.js` | `resolveGate` nhận `ifRev`; `taskRow.rev` |
+| `packages/core/src/tasks/records/tasks.ts`, `packages/core/src/tasks/records/task-rows.ts` | `resolveGate` nhận `ifRev`; `taskRow.rev` |
 | `packages/daemon/tests/wire.test.ts`, `methods.test.ts`, `packages/protocol/tests/contract.test.ts` | kỳ vọng inventory/capability/lỗi mới |

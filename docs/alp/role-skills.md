@@ -50,6 +50,17 @@ made for the session links each skill's own directory. Claude lists the skills w
 their descriptions and runs one with its Skill tool, read-only sessions included. Codex
 reads the files.
 
+Antigravity agents open their skills with the ALP tool `alp_skill_read {skill, file?}`
+instead (t-4b59): headless agy denies reads outside the workspace, and a denied read ends
+the turn. For them the skill list names each skill and its description but no path, and
+the instructions say to open a skill and its files only with `alp_skill_read`, never by
+path. The tool returns `SKILL.md` by default, with the list of the skill's other files, or
+one file by a path relative to the skill's directory. It answers only for the caller's own
+skills, and refuses an absolute path, a path or link that leaves the skill's directory, a
+hidden entry (also one a link inside the skill points at), a directory, a binary file and a
+file over 256 KB (`packages/runtime/src/skill-files.ts`). It returns text only: a skill's
+`scripts/` stay outside the workspace. A supervisor of an Antigravity root may call it too.
+
 Each first use of a skill in a session is logged. `alp log` prints it as
 `✦ peer uses skill bug-loop` (or `… (Skill tool)`), and a supervisor's digest notes it.
 

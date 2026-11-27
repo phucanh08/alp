@@ -1,4 +1,4 @@
-// alp dashboard's host owner handlers (t-a95b.1 group B, src/dashboard/owner/host.js;
+// alp dashboard's host owner handlers (t-a95b.1 group B, src/dashboard/owner/host.ts;
 // docs/alp/dashboard.md §4.7): each one reuses the CLI (alp provider add/test, alp doctor, alp
 // terminal) or alpd's registry, and refuses bad values before anything runs or reaches alpd.
 import test from 'node:test';

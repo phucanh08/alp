@@ -244,8 +244,8 @@ principal. Cầu nối WS trong test chỉ chuyển frame và không xác thực
 
 - `packages/client/package.json`: thêm `./ipc`, `./portable`, `./websocket` vào `exports`, đổi
   `description`.
-- `packages/client/src/index.js`: `AlpClient` thành lớp con của `AlpRpcClient`; thêm
-  `connectSocket`, `export *` từ `./portable.js`.
+- `packages/client/src/index.ts`: `AlpClient` thành lớp con của `AlpRpcClient`; thêm
+  `connectSocket`, `export *` từ `./portable.ts`.
 - `test/integration/client-sdk.test.ts` (mới, chạy cùng `node scripts/test.ts integration`).
 - `scripts/client-sdk-smoke.ts` (mới). Task 04B đang sửa `scripts/tarball-consumer.ts`,
   `scripts/validate.ts`, `scripts/pack-check.ts` và `.github/workflows/ci.yml`; nhánh này

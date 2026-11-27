@@ -252,7 +252,7 @@ alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, t
 
 ### 5.1 Quy tắc
 
-1. **Default deny.** Chỉ method có `status: 'exposed'` trong `apps/gateway/src/policy.js`
+1. **Default deny.** Chỉ method có `status: 'exposed'` trong `apps/gateway/src/policy.ts`
    (`MATRIX`) mới được forward. Một capability alpd liệt kê **không** cấp quyền remote.
 2. **Workspace**: so khớp **nguyên chuỗi** với đường dẫn đã nhập hoặc đường dẫn canonical của grant.
    - Không so tiền tố.
@@ -384,7 +384,7 @@ chuyển nguyên vẹn, trừ các method đọc file của host (§5.7, §5.10)
 
 ### 5.4 Method exposure matrix
 
-Nguồn sự thật là `MATRIX` trong `apps/gateway/src/policy.js`. Test:
+Nguồn sự thật là `MATRIX` trong `apps/gateway/src/policy.ts`. Test:
 
 - mọi method v1 phải được phân loại;
 - mọi method exposed phải có ca vượt scope trong `authorization.test.ts`;
@@ -475,7 +475,7 @@ Cột Test dùng các mã sau:
 | `host.workspace.reveal` | — | host: thư mục của một workspace còn sống trong registry của alpd, gọi theo id (params không bao giờ là path); file manager của host (`open` / `explorer.exe` / `xdg-open`, argv, không shell) mở thư mục đó trên chính host (Open in file manager của menu ⋮ session, t-747e); biến `ALP_DASHBOARD_FILE_MANAGER` (đường dẫn tuyệt đối, chỉ trong môi trường của chính tiến trình alp dashboard) thay chương trình đó: một file manager khác, hoặc một chương trình ghi lại lệnh gọi trong e2e | — | owner, `handler: true` | owner, -32601 |
 | `host.workspace.editors`, `host.workspace.open` | — | host: các editor của một bảng cố định (`EDITORS`: VS Code, Cursor, Zed, Xcode, IDE JetBrains, file manager) đã cài trên host, tìm ở chỗ cố định (bundle `.app`, `.exe` cố định, tên CLI cố định trên PATH; không shell, không `which`); `open` mở thư mục của một workspace còn sống trong registry, gọi theo id (params không bao giờ là path hay program), bằng editor gọi theo id (argv, không shell; Open in editor của Paseo, t-a876) | — | owner, `handler: true` | owner, -32601 |
 | `host.project.register`, `host.project.remove` | — | host: thư mục bất kỳ có thật (kiểm trên host) | — | owner, `handler: true` | owner, -32601 |
-| `host.workspace.facts` | — (gateway, `handler: true`) | host: thư mục của các workspace trong registry của alpd, gọi theo id (≤ 50; params không bao giờ là path); nhánh, `+/-` so với merge-base với nhánh gốc, PR và CI qua `gh`, logo trong workspace (data URI PNG/SVG/ICO ≤ 256 KB, không ra ngoài realpath của root); git/gh `execFile` không shell, có timeout và maxBuffer; cache 60 s, `refresh` ≥ 10 s/thư mục, một lần đọc/thư mục đang chạy, 4 thư mục cùng lúc | — | owner (§5.19), handler của dashboard (`owner/workspace-facts.js`, sidebar t-ff83) | owner, -32601 |
+| `host.workspace.facts` | — (gateway, `handler: true`) | host: thư mục của các workspace trong registry của alpd, gọi theo id (≤ 50; params không bao giờ là path); nhánh, `+/-` so với merge-base với nhánh gốc, PR và CI qua `gh`, logo trong workspace (data URI PNG/SVG/ICO ≤ 256 KB, không ra ngoài realpath của root); git/gh `execFile` không shell, có timeout và maxBuffer; cache 60 s, `refresh` ≥ 10 s/thư mục, một lần đọc/thư mục đang chạy, 4 thư mục cùng lúc | — | owner (§5.19), handler của dashboard (`owner/workspace-facts.ts`, sidebar t-ff83) | owner, -32601 |
 | `schedule.list`, `schedule.get` | `schedule` | host: mọi `projectRoot` của alpd (owner không bị giới hạn ở workspace được grant); chuyển tới alpd nguyên vẹn với `params` liệt kê, kiểm schema v1 | — | owner (§5.19): sidebar Schedules của host owner; mọi credential khác như denied | owner, owner-schedule, -32601 |
 | `host.library.get` | — (gateway, `handler: true`) | host: entry của library host hoặc project qua `library.get` của alpd (env/header là marker) | — | owner (§5.19), handler của dashboard | owner, owner-library, -32601 |
 | `host.library.save`/`delete` | — (gateway, `handler: true`) | host: ghi agent, skill, team, MCP, hook ở library hoặc project qua `library.save`/`delete` của alpd, có `revision`; marker giữ secret, text mask bị từ chối | — | owner (§5.19), handler của dashboard | owner, owner-library, -32601 |
@@ -723,7 +723,7 @@ như Paseo, nhưng chỉ đọc, với một quyền riêng.
 - Item `tool_call` giờ có `detail` theo loại: `read`, `edit`, `write`, `search`, `fetch`, `sub_agent`,
   `plan`, `plain_text` bên cạnh `shell` và `unknown` (docs/protocol/alp-json-rpc-v1.md §8.6). Chúng đi
   qua như mọi event của session trong grant: gateway chuyển nguyên envelope (`#event` trong
-  `apps/gateway/src/connection.js`, chỉ cho session đã biết thuộc grant hoặc session con của tree
+  `apps/gateway/src/connection.ts`, chỉ cho session đã biết thuộc grant hoặc session con của tree
   trong grant), không đổi code, không viết lại hay lọc detail.
 - **Cùng loại thông tin đã đi qua trước đây.** Output của `shell` (lệnh agent chạy, kể cả `cat` một
   file), detail `unknown` của tool, và command `Name {json}` của Claude (ví dụ
@@ -746,7 +746,7 @@ như Paseo, nhưng chỉ đọc, với một quyền riêng.
 Text lỗi của runtime, của provider (CLI Codex/Claude, ACP) và của store alpd có thể nêu đường dẫn
 host (EACCES trên `$ALP_HOME/state`, chỗ cài CLI, worktree), kéo theo stack trace hay stderr của CLI,
 và trích file không parse được (V8). Gateway áp một quy tắc chung (`safeErrorText`, `safeAlpError`
-trong `apps/gateway/src/policy.js`):
+trong `apps/gateway/src/policy.ts`):
 
 - **Giữ**: mã lỗi (số JSON-RPC và `data` như cũ; `code` chuỗi của `AlpError`/`SessionError` nếu là
   định danh đơn giản `[A-Za-z0-9_.-]{1,64}`), và dòng đầu của message.
@@ -1017,9 +1017,9 @@ Quyết định (main, theo quyền người dùng, 2026-11-21): ALP.app và `al
 - **Owner là gì**: một kết nối WebSocket được gọi các method mà matrix (§5.4) đánh dấu `owner`. Không
   có permission nào cấp được nó: thêm tay một chuỗi permission vào `credentials.json` không làm ai thành
   owner (store bỏ chuỗi lạ khi đọc; không permission hợp lệ nào là owner).
-- **Ai là owner**: chỉ khi **cả bốn** điều kiện đúng (`apps/gateway/src/owner.js`,
+- **Ai là owner**: chỉ khi **cả bốn** điều kiện đúng (`apps/gateway/src/owner.ts`,
   `ClientConnection#isOwner` trong `connection.js`):
-  1. gateway được tạo với option `owner`. Chỉ `alp dashboard` (`packages/cli/src/dashboard/main.js`)
+  1. gateway được tạo với option `owner`. Chỉ `alp dashboard` (`packages/cli/src/dashboard/main.ts`)
      truyền nó; `alp-gateway serve` không bao giờ truyền, nên sau gateway riêng **không ai** là owner.
      Gateway có `owner` phải nghe loopback, không TLS, không `trustProxy`, không `allowInsecure`, nếu
      không `createGateway` từ chối;
@@ -1088,7 +1088,7 @@ Quyết định (main, theo quyền người dùng, 2026-11-21): ALP.app và `al
   `<img>`. `schedule.list`/`schedule.get` là owner (chỉ đọc); `schedule.create`/`cancel` vẫn prohibited.
 - **Thêm method owner**: thêm entry `status: 'owner'` với `tests: ['owner']` vào khối
   `// --- owner: host (group B) ---` hoặc `// --- owner: library (group C) ---` của `policy.js`, và
-  handler (nếu cần) vào `owner/host.js`, `owner/library.js` hoặc một bảng riêng gộp trong `owner/index.js` (như `owner/workspace-facts.js`). Một tên định nghĩa hai lần làm dashboard
+  handler (nếu cần) vào `owner/host.ts`, `owner/library.ts` hoặc một bảng riêng gộp trong `owner/index.ts` (như `owner/workspace-facts.ts`). Một tên định nghĩa hai lần làm dashboard
   dừng lúc khởi động.
 
 ## 6. Streaming và recovery
