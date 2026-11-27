@@ -175,6 +175,24 @@ test('helpers: display names, sniffing and lower-only limits', { skip }, async t
   assert.equal(config.problems.length, 3);
 });
 
+test('attachments.json: a link is never followed; text that is not JSON or limits that are not an object keep the defaults', { skip }, async t => {
+  const defer = teardown(t);
+  const home = await mkdtemp(path.join(tmpdir(), 'alpd-attach-config-'));
+  defer(() => rm(home, { recursive: true, force: true }));
+  const elsewhere = path.join(home, 'elsewhere.json');
+  await writeFile(elsewhere, JSON.stringify({ limits: { maxObjectBytes: 1000 } }));
+  await symlink(elsewhere, path.join(home, 'attachments.json'));
+  const linked = await readAttachmentConfig(home);
+  assert.deepEqual(linked.limits, {}, 'the limits behind a link are not read');
+  assert.equal(linked.problems.length, 1);
+  assert.match(linked.problems[0]!, /^attachments\.json cannot be read \(ELOOP\); the default limits hold$/);
+  await unlink(path.join(home, 'attachments.json'));
+  await writeFile(path.join(home, 'attachments.json'), '{ not json');
+  assert.deepEqual(await readAttachmentConfig(home), { limits: {}, problems: ['attachments.json is not JSON; the default limits hold'] });
+  await writeFile(path.join(home, 'attachments.json'), JSON.stringify({ limits: [1] }));
+  assert.deepEqual(await readAttachmentConfig(home), { limits: {}, problems: ['attachments.json limits must be an object'] });
+});
+
 test('hello lists attachments with effective limits; an upload round trip stores an immutable private object and answers no host path', { skip }, async t => {
   const env = await setup(t, { limits: { maxObjectBytes: 1024 * 1024 } });
   const daemon = await env.start();
