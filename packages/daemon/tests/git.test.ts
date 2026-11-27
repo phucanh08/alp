@@ -969,3 +969,58 @@ test('a pending async ancestor check cannot extend the Git deadline', { skip: !h
   assert.equal(calls, 1, 'no new checks start after the deadline');
   assert.equal(gitReadsRunning(), 0, 'slot released once pending filesystem work settles');
 });
+
+test('Git reads waiting for a turn are bounded: past maxQueued refused at once, the rest refused at the deadline', { skip }, async t => {
+  const base = await sandbox(t);
+  const root = path.join(base, 'work');
+  const git = await repository(root);
+  await put(path.join(root, 'a.txt'), 'a\n');
+  git('add', '.');
+  git('commit', '-q', '-m', 'first');
+  // A Git that answers its version and hangs on everything else: each read holds its turn until the deadline.
+  const slow = path.join(base, 'slow-git');
+  await writeFile(slow, `#!${process.execPath}\nif (process.argv.includes('--version')) process.stdout.write('git version 2.40.0\\n');\nelse setTimeout(() => {}, 60000);\n`);
+  await chmod(slow, 0o755);
+  const causes: string[] = [];
+  const reader = readerFor({ w: root }, { binary: slow, timeoutMs: 3_000, log: (_message, fields) => causes.push(String(fields.cause)) });
+  const extra = 3;
+  const reads = GIT_READ.maxConcurrent + GIT_READ.maxQueued + extra;
+  const answers = await Promise.all(Array.from({ length: reads }, () => refusal(reader.status('w'), base)));
+  assert.deepEqual(new Set(answers.map(answer => `${answer.code} ${answer.reason}`)), new Set(['1000 git_failed']));
+  const count = (cause: string) => causes.filter(entry => entry === cause).length;
+  assert.equal(count('too many Git reads waiting'), extra, `the reads past ${GIT_READ.maxConcurrent} running and ${GIT_READ.maxQueued} waiting`);
+  assert.ok(count('timed out waiting for a turn') >= 1, `some waiting read timed out before its turn: ${JSON.stringify(causes)}`);
+  assert.equal(causes.length, reads);
+  for (let i = 0; i < 50 && gitReadsRunning() !== 0; i++) await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(gitReadsRunning(), 0, 'every turn is given back');
+});
+
+test('the object format: a sha256 repository diffs against its own empty tree; an unknown format fails closed', { skip }, async t => {
+  const base = await sandbox(t);
+  const root = path.join(base, 'sha256');
+  await mkdir(root, { recursive: true });
+  const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=ALP', '-c', 'user.email=alp@example.com', ...args], { cwd: root, env: cleanEnv(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  git('init', '-q', '-b', 'main', '--object-format=sha256');
+  assert.equal(git('rev-parse', '--show-object-format').trim(), 'sha256');
+  await put(path.join(root, 'a.txt'), 'one\n');
+  git('add', 'a.txt');
+  // No commit yet: staged and uncommitted compare with the empty tree of the repository's format.
+  const reader = readerFor({ w: root });
+  for (const mode of ['staged', 'uncommitted']) {
+    const [page] = await allPages(reader, { workspaceId: 'w', compare: { mode } }, base);
+    assert.deepEqual(page.files.map((file: Json) => [file.path, file.change]), [['a.txt', 'added']], mode);
+  }
+  // A configuration naming a format alpd does not know (a fake Git can say so; a real one refuses to run).
+  const plain = path.join(base, 'plain');
+  const plainGit = await repository(plain);
+  await put(path.join(plain, 'a.txt'), 'a\n');
+  plainGit('add', '.');
+  const odd = path.join(base, 'odd-git');
+  await writeFile(odd, `#!${process.execPath}\nconst args = process.argv.slice(2);\nif (args.includes('--version')) process.stdout.write('git version 2.40.0\\n');\nelse if (args.includes('config')) process.stdout.write('extensions.objectformat\\nsha512\\0');\nelse process.exit(1);\n`);
+  await chmod(odd, 0o755);
+  const causes: string[] = [];
+  const oddReader = readerFor({ w: plain }, { binary: odd, log: (_message, fields) => causes.push(String(fields.cause)) });
+  assert.deepEqual(await refusal(oddReader.status('w'), base), { code: 1000, reason: 'git_failed' });
+  assert.deepEqual(await refusal(oddReader.diff({ workspaceId: 'w', compare: { mode: 'staged' } }), base), { code: 1000, reason: 'git_failed' });
+  assert.deepEqual(causes, ['unknown object format', 'unknown object format']);
+});

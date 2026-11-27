@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-protocol';
-import { FIND_LIMITS, GIT_CHECK, createFindPages, findWorkspaceEntries, gitChecksRunning, listWorkspaceDirectory, previewWorkspaceFile, readWorkspaceFile, relativeSegments, resolveGit, searchHostDirectories, searchWorkspaceFiles } from '@anhlp/alp-daemon/files';
+import { FIND_LIMITS, GIT_CHECK, HOST_DIRECTORIES, createFindPages, findWorkspaceEntries, gitChecksRunning, listWorkspaceDirectory, previewWorkspaceFile, readWorkspaceFile, relativeSegments, resolveGit, searchHostDirectories, searchWorkspaceFiles } from '@anhlp/alp-daemon/files';
 
 // `any`: alpd's file answers and refusals are JSON, and some params are invalid on purpose; the tests read the fields they assert on.
 type Json = any;
@@ -922,4 +922,41 @@ test('host directories: a typed path completes in its parent, a word is found un
   assert.deepEqual(await search('ohr'), code(['other']), 'letters in order');
   assert.deepEqual(await search('   '), []);
   assert.deepEqual(await search(42 as Json), []);
+});
+
+test('search ranks letters-in-order matches last (tier 4): fewest gaps first, then nearest; a path query too', async t => {
+  const { root } = await workspace(t);
+  for (const file of ['xaybzc.ts', 'deep/axbc.ts', 'axbc.ts', 'zabc.ts', 'abcd.ts', 'abc', 'cba.ts']) await put(path.join(root, file), 'text');
+  const search = async (query: string) => (await searchWorkspaceFiles(root, { query, limit: 100 })).files.map(file => file.path);
+  assert.deepEqual(await search('abc'), ['abc', 'abcd.ts', 'zabc.ts', 'axbc.ts', 'deep/axbc.ts', 'xaybzc.ts'], 'equal, starts with, holds, then letters in order');
+  assert.deepEqual(await search('xbz'), ['xaybzc.ts'], 'only letters in order');
+  assert.deepEqual(await search('dp/ax'), ['deep/axbc.ts'], 'a path query by letters in order');
+  assert.deepEqual(await search('qqq'), []);
+});
+
+test('host directories: a word scans at most HOST_DIRECTORIES.scanned directories, a typed path reads at most .listed entries; both say truncated', async t => {
+  const { root: home } = await workspace(t);
+  const make = async (names: string[], parent = home, kind: 'dir' | 'file' = 'dir') => {
+    for (let i = 0; i < names.length; i += 500) await Promise.all(names.slice(i, i + 500).map(name => kind === 'dir' ? mkdir(path.join(parent, name)) : writeFile(path.join(parent, name), '')));
+  };
+  const named = (from: number, to: number, prefix: string) => Array.from({ length: to - from }, (_, index) => `${prefix}${String(from + index).padStart(5, '0')}`);
+  // One level down: 'a' holds the one match, the rest are empty.
+  await mkdir(path.join(home, 'a', 'wanted'), { recursive: true });
+  const cap = HOST_DIRECTORIES.scanned;
+  await make(named(0, cap - 3, 'd'));
+  assert.deepEqual(await searchHostDirectories('wanted', { home }), { entries: [{ path: path.join(home, 'a', 'wanted') }] }, `${cap - 1} looked at: complete`);
+  await make(named(cap - 3, cap - 2, 'd'));
+  assert.deepEqual(await searchHostDirectories('wanted', { home }), { entries: [{ path: path.join(home, 'a', 'wanted') }], truncated: true }, `the ${cap}th looked at is the last`);
+  await make(named(cap - 2, cap - 1, 'd'));
+  assert.deepEqual(await searchHostDirectories('wanted', { home }), { entries: [], truncated: true }, 'the cap is reached one level up: the next level is never read');
+  // A typed path: its parent is read up to .listed entries (files count too).
+  const parent = path.join(home, 'many');
+  await mkdir(parent);
+  await mkdir(path.join(parent, 'pick'));
+  await make(named(0, HOST_DIRECTORIES.listed - 1, 'f'), parent, 'file');
+  assert.deepEqual(await searchHostDirectories(`${parent}/pi`, { home }), { entries: [{ path: path.join(parent, 'pick') }] }, `${HOST_DIRECTORIES.listed} entries: complete`);
+  await writeFile(path.join(parent, 'one-more'), '');
+  const over = await searchHostDirectories(`${parent}/pi`, { home });
+  assert.equal(over.truncated, true, `${HOST_DIRECTORIES.listed + 1} entries: truncated`);
+  assert.ok(over.entries.length <= 1);
 });
