@@ -25,6 +25,7 @@ import { createFindPages, FileAccessError, FilesError, listWorkspaceDirectory, p
 import { createGitReader } from './workspaces/git.ts';
 import { createScheduleStore, projectKey } from './schedules/schedules.ts';
 import { createScheduleHandlers } from './schedules/rpc/handlers.ts';
+import { createTerminalHandlers } from './terminals/rpc/handlers.ts';
 import { createAttachmentHandlers } from './attachments/rpc/handlers.ts';
 import { createCatalogHandlers } from './catalog/rpc/handlers.ts';
 import { createAttachmentStore, type AttachmentRuntime, type AttachmentStoreOptions } from './attachments/attachments.ts';
@@ -1066,10 +1067,6 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     log: { warn: (message, fields) => log.warn(message, fields), info: (message, fields) => log.info(message, fields) },
     ...terminalOptions,
   }) : undefined;
-  const terminalCall = <T>(run: (service: NonNullable<typeof terminals>) => Promise<T>) => {
-    if (!terminals) throw new RpcError(ERROR.unavailable, 'This alpd has no home: it serves no terminals', { reason: 'terminal_unsupported' });
-    return run(terminals);
-  };
   const gitCall = <T>(run: (reader: NonNullable<typeof gitReader>) => Promise<T>) => {
     if (!gitReader) throw new RpcError(ERROR.unavailable, 'Registry needs ALP_HOME');
     return run(gitReader);
@@ -1083,6 +1080,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   const findPages = createFindPages();
   const catalogHandlers = createCatalogHandlers({ modelCatalog });
   const attachmentHandlers = createAttachmentHandlers({ attachments, log });
+  const terminalHandlers = createTerminalHandlers({ terminals });
   const scheduleHandlers = createScheduleHandlers({ schedules, scheduler, runtime, log });
   const handlers: Record<string, (connection: Connection, params: any) => Promise<unknown> | unknown> = {
     'extension.register': async (connection, params) => {
@@ -1344,20 +1342,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     'project.remove': (_c, p) => registryMutation('project.remove', p),
     'workspace.update': (_c, p) => registryMutation('workspace.update', p),
     ...catalogHandlers,
-    // attachment.* (§12.6): each call acts for its principal context; without the store (no home or
-    // store, or Windows) alpd does not serve them, as for any method it does not know.
-    // terminal.* (§12.10): each call acts for its principal context; input, resize and the stream
-    // belong to the connection that attached the terminal.
-    'terminal.create': (c, p) => agentRefused(c, 'terminal.create') ?? terminalCall(service => service.create(principalOf(p), p)),
-    'terminal.watch': (c, p) => terminalCall(service => service.watch(principalOf(p), c, p)),
-    'terminal.unwatch': (c) => terminalCall(service => service.unwatch(c)),
-    'terminal.capture': (_c, p) => terminalCall(service => service.capture(principalOf(p), p)),
-    'terminal.list': (_c, p) => terminalCall(service => service.list(principalOf(p), p)),
-    'terminal.attach': (c, p) => agentRefused(c, 'terminal.attach') ?? terminalCall(service => service.attach(principalOf(p), c, p)),
-    'terminal.input': (c, p) => agentRefused(c, 'terminal.input') ?? terminalCall(service => service.input(principalOf(p), c, p)),
-    'terminal.resize': (c, p) => terminalCall(service => service.resize(principalOf(p), c, p)),
-    'terminal.close': (_c, p) => terminalCall(service => service.close(principalOf(p), p)),
-    'terminal.revoke': (_c, p) => terminalCall(service => service.revoke(p.principalId)),
+    ...terminalHandlers,
     ...attachmentHandlers,
     async 'session.create'(connection, { sessionId, workspaceId, spec, history = 'skip', delegation = true, resume: resuming = false }) {
       if (workspaceId !== undefined) {
