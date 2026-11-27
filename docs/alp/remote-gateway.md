@@ -41,7 +41,7 @@ Số mục (§) được code tham chiếu; giữ ổn định.
   - `daemonVersion` lấy từ alpd;
   - `hostname`: tên máy của daemon host (alpd trả `os.hostname()`), để client đặt nhãn host như
     Paseo (patch 0017). Gateway cắt khoảng trắng hai đầu và chỉ chuyển khi dài 1..253 ký tự, không có
-    ký tự điều khiển hay ký tự định dạng như bidi override, zero-width (`hostLabel` trong `policy.js`); nếu không thì bỏ field. Tên máy không phải
+    ký tự điều khiển hay ký tự định dạng như bidi override, zero-width (`hostLabel` trong `policy.ts`); nếu không thì bỏ field. Tên máy không phải
     secret nhưng là thông tin host: client nào đã qua xác thực và hello cũng thấy, như Paseo;
   - `capabilities` = capability alpd liệt kê ∩ `{attach.after, prompt.receipts, task, team,
     library, settings.language, session.list.page, question.watch, question.watch.turns,
@@ -243,7 +243,7 @@ alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, t
   args và `params` của provider). Gateway chỉ chuyển nội dung entry qua `projectLibraryContent`
   (§5.7): field liệt kê mới đi, mọi field có thể chứa secret thành marker `{ "$secret": "keep" }`.
   Các dòng của `library.list`, `team.list`, `library.models` chỉ giữ các field liệt kê trong
-  `policy.js`. Test E2E đặt sentinel vào các chỗ đó và kiểm tra không cái nào tới client (§9).
+  `policy.ts`. Test E2E đặt sentinel vào các chỗ đó và kiểm tra không cái nào tới client (§9).
 - Test xác nhận log không chứa secret: `apps/gateway/tests/{credentials,gateway}.test.ts` và
   `test/integration/gateway.test.ts`.
 - Proxy không được log header `Authorization` hay `Sec-WebSocket-Protocol` (xem `deploy/`).
@@ -365,7 +365,7 @@ chuyển nguyên vẹn, trừ các method đọc file của host (§5.7, §5.10)
   - id chưa tồn tại → tạo mới.
   Sau khi tạo, root được kiểm tra lại. Nếu do race nó nằm ngoài scope, gateway `session.release`
   rồi từ chối.
-- `model` theo ngữ pháp model id của alpd (`isModelId` trong `policy.js`, đối chiếu
+- `model` theo ngữ pháp model id của alpd (`isModelId` trong `policy.ts`, đối chiếu
   `packages/runtime/src/resolve.ts`), không theo quy tắc tên agent. Tối đa 256 ký tự:
   - `codex:<id>`, `claude:<id>`, `antigravity:<id>`; `<id>` là ký tự nhìn thấy được, không
     khoảng trắng, không ký tự điều khiển (vd. `claude:claude-opus-4-8[1m]`);
@@ -548,7 +548,7 @@ Quy tắc:
   `image/webp`), `data` (base64) và `name`; `path`, `url` hay trường lạ bị từ chối `-32602` trước
   khi tới handler. Phần có type khác (`localImage`, `file`, `resource`…) bị `1003 content_type`.
   Vì vậy client từ xa không thể trỏ tới một file trên host: alpd tự dựng data URL từ `data`.
-- Giới hạn của gateway (`GATEWAY_PROMPT_IMAGES` trong `policy.js`), chặt hơn của alpd (8 ảnh,
+- Giới hạn của gateway (`GATEWAY_PROMPT_IMAGES` trong `policy.ts`), chặt hơn của alpd (8 ảnh,
   5 MiB mỗi ảnh): tối đa **4** ảnh, mỗi ảnh tối đa **2 MiB** sau giải mã, tổng tối đa **2,5 MiB**,
   để dạng base64 vừa frame mặc định 4 MiB (`limits.maxFrame`, §7.3). Với `limits.maxFrame` nhỏ hơn,
   `promptImageLimits(maxFrame)` hạ cả hai mức xuống `(maxFrame − 64 KiB) × 3/4`, nên ảnh trong giới
@@ -679,7 +679,7 @@ như Paseo, nhưng chỉ đọc, với một quyền riêng.
   (`nlink` 1, nên hard link tới file ngoài workspace bị từ chối), mở với `O_NOFOLLOW | O_NONBLOCK`,
   kiểm tra lại qua handle. Vi phạm → `1003 linked`.
 - **Lỗi không lộ host** (t-70c4): với mọi lỗi của alpd, chỉ mã và `data.reason` (chuỗi đơn giản) đi
-  qua; message là câu cố định của gateway theo reason (`FILE_REFUSALS` trong `connection.js`), lỗi
+  qua; message là câu cố định của gateway theo reason (`FILE_REFUSALS` trong `connection.ts`), lỗi
   không có reason thành câu chung. Không có đường dẫn host hay trích nội dung file trong lỗi.
 - **Mối đe doạ còn lại**:
   - Block list là mức sàn: file khác vẫn có thể chứa secret (ví dụ `config/prod.yml`). Vì vậy quyền
@@ -698,7 +698,7 @@ như Paseo, nhưng chỉ đọc, với một quyền riêng.
 
 - **Ảnh (t-a35b)**: `workspace.files.preview` (protocol §12.11) mở cho `files.read` chỉ để tab file
   hiện ảnh, thu hẹp hơn hẳn bản alpd phục vụ client cục bộ:
-  - Chỉ ảnh raster theo đuôi của `path` (`PREVIEW_IMAGE_TYPES` trong `policy.js`: `png`, `jpg`,
+  - Chỉ ảnh raster theo đuôi của `path` (`PREVIEW_IMAGE_TYPES` trong `policy.ts`: `png`, `jpg`,
     `jpeg`, `gif`, `webp`, không phân biệt hoa thường). **SVG bị loại** vì là tài liệu có thể mang
     script; file `.svg` vẫn đọc như text bằng `workspace.files.read`. Đuôi khác → `1003 not_image`
     trước alpd.
@@ -789,7 +789,7 @@ commit, push, pull, merge, checkout, switch, stash hay thao tác Git nào khác 
 - **Quyền**: `workspace.git.status` (nhánh, upstream, ahead/behind, danh sách file thay đổi, không có
   nội dung) cần `project.read`. `workspace.git.diff` trả hunk, tức nội dung file (cả dòng đã xoá và
   nội dung lịch sử), nên cần **cả** `project.read` và `files.read` (`alsoRequires` trong
-  `policy.js`; thiếu cái nào thì `1003 grant` nêu đúng `data.permission` đó, alpd không nhận gì).
+  `policy.ts`; thiếu cái nào thì `1003 grant` nêu đúng `data.permission` đó, alpd không nhận gì).
   `files.read` không bao giờ là mặc định (§4.2).
 - **Phạm vi**: `workspaceId` phải là workspace của registry mà thư mục khớp nguyên chuỗi một grant
   (`#registryWorkspace`, như `workspace.get`; managed worktree của credential được tính). Không có
@@ -797,7 +797,7 @@ commit, push, pull, merge, checkout, switch, stash hay thao tác Git nào khác 
 - **Params**: schema từ chối key lạ (`-32602`), gateway vẫn chỉ gửi `workspaceId`, `compare`
   (dựng lại từ `mode`, `baseRef`, `ignoreWhitespace`), `path`, `cursor`. `path` kiểm tra như §5.10:
   không tương đối thuần → `-32602 invalid_path`, bị chặn → `1003 blocked_path`, trước alpd.
-- **Answer** (`projectGitStatus`, `projectGitDiff` trong `policy.js`): chỉ các field của schema, mỗi
+- **Answer** (`projectGitStatus`, `projectGitDiff` trong `policy.ts`): chỉ các field của schema, mỗi
   field kiểm kiểu. Dòng status hay file diff có `path`/`oldPath` không tương đối thuần (tuyệt đối, ổ
   đĩa, `\`, `.`/`..`) hoặc bị chặn bị bỏ, cộng vào `hiddenCount`, log `ALP_GATEWAY_FILE_OUT_OF_SCOPE`;
   khi hỏi một `path`, file không có bên nào là `path` đó cũng bị bỏ. `remoteUrl` chỉ đi qua khi là URL
@@ -814,7 +814,7 @@ commit, push, pull, merge, checkout, switch, stash hay thao tác Git nào khác 
   `kind: too_large` không hunk (giữ số dòng thêm/xoá). Cursor của alpd đi qua nguyên vẹn.
 - **Lỗi**: chỉ mã và `data.reason` (`not_repository`, `unknown_ref`, `invalid_compare`,
   `stale_snapshot`, `invalid_cursor`, `git_unavailable`, `git_failed`…) đi qua; message là câu cố định
-  (`GIT_REFUSALS` trong `connection.js`). Không có đường dẫn host hay text Git.
+  (`GIT_REFUSALS` trong `connection.ts`). Không có đường dẫn host hay text Git.
 - **Rủi ro còn lại**: diff cho thấy nội dung file đã xoá và lịch sử so với base, mà `workspace.files.read`
   không cho xem; block list vẫn là mức sàn như §5.10. Tên nhánh, upstream và `baseRef` là metadata của
   repo, đi qua như text (không ký tự điều khiển, ≤ 1024 ký tự).
@@ -843,10 +843,10 @@ xuống, giải nén, chạy file hay render HTML qua remote.
   invalid_data` trước alpd; frame vẫn bị chặn bởi `limits.maxFrame`, rate và `maxPending` như mọi
   request (không buffer vô hạn). Quota (2 upload đang dở, 200 MiB mỗi principal, 1 GiB mỗi daemon,
   tính cả object còn được tham chiếu) do alpd giữ: `1005 quota_exceeded` với `data.limit`.
-- **Answer**: `projectUploadBegun`, `projectAttachment` trong `policy.js` chỉ giữ field của schema,
+- **Answer**: `projectUploadBegun`, `projectAttachment` trong `policy.ts` chỉ giữ field của schema,
   kiểm từng field (id, tên hiển thị ≤ 255 byte không ký tự điều khiển hay dấu phân cách đường dẫn,
   MIME, kích thước, SHA-256, thời điểm); không bao giờ có đường dẫn host. Field sai → `1000`.
-- **Lỗi**: message cố định theo `data.reason` (`ATTACHMENT_REFUSALS` trong `connection.js`); chỉ mã,
+- **Lỗi**: message cố định theo `data.reason` (`ATTACHMENT_REFUSALS` trong `connection.ts`); chỉ mã,
   `reason` và số liệu client cần để tiếp tục (`received`, `size`, `max`, `limit`, `maxPerPrompt`,
   `maxPromptBytes`) đi qua. Không đường dẫn kho, không text lỗi hệ thống.
 - **Thu hồi giữa chừng**: `credential revoke` (hay `rotate`/`reissue`) đóng connection ngay (4401);
@@ -909,7 +909,7 @@ bao giờ bị xoá, phục hồi được thành session mới bằng `session.
 - **`history.reset`**: event live `{ type: 'history.reset', generation, reason: 'rewind', branchId }`
   không có cursor, alpd chỉ gửi tới connection đang attach root; gateway chuyển nguyên vẹn sau kiểm
   scope như mọi event. Client bỏ history đã cache, tải tail mới và attach lại với `generation` mới.
-- **Lỗi**: message cố định theo `data.reason` (`CONVERSATION_REFUSALS` trong `connection.js`:
+- **Lỗi**: message cố định theo `data.reason` (`CONVERSATION_REFUSALS` trong `connection.ts`:
   `session_busy`, `stale_generation`, `turn_not_found`, `turn_in_progress`, `empty_prefix`,
   `boundary_unmapped`, `runtime_unsupported`, `native_refused`, `branch_not_found`,
   `attachment_forbidden`, `key_conflict`, `outcome_unknown`, `workspace_mismatch`…; reason lạ giữ
@@ -1018,7 +1018,7 @@ Quyết định (main, theo quyền người dùng, 2026-11-21): ALP.app và `al
   có permission nào cấp được nó: thêm tay một chuỗi permission vào `credentials.json` không làm ai thành
   owner (store bỏ chuỗi lạ khi đọc; không permission hợp lệ nào là owner).
 - **Ai là owner**: chỉ khi **cả bốn** điều kiện đúng (`apps/gateway/src/owner.ts`,
-  `ClientConnection#isOwner` trong `connection.js`):
+  `ClientConnection#isOwner` trong `connection.ts`):
   1. gateway được tạo với option `owner`. Chỉ `alp dashboard` (`packages/cli/src/dashboard/main.ts`)
      truyền nó; `alp-gateway serve` không bao giờ truyền, nên sau gateway riêng **không ai** là owner.
      Gateway có `owner` phải nghe loopback, không TLS, không `trustProxy`, không `allowInsecure`, nếu
@@ -1087,7 +1087,7 @@ Quyết định (main, theo quyền người dùng, 2026-11-21): ALP.app và `al
   cố định (`ICON_CANDIDATES`), đuôi file và nội dung (magic PNG/ICO, `<svg`) phải khớp; web chỉ hiện qua
   `<img>`. `schedule.list`/`schedule.get` là owner (chỉ đọc); `schedule.create`/`cancel` vẫn prohibited.
 - **Thêm method owner**: thêm entry `status: 'owner'` với `tests: ['owner']` vào khối
-  `// --- owner: host (group B) ---` hoặc `// --- owner: library (group C) ---` của `policy.js`, và
+  `// --- owner: host (group B) ---` hoặc `// --- owner: library (group C) ---` của `policy.ts`, và
   handler (nếu cần) vào `owner/host.ts`, `owner/library.ts` hoặc một bảng riêng gộp trong `owner/index.ts` (như `owner/workspace-facts.ts`). Một tên định nghĩa hai lần làm dashboard
   dừng lúc khởi động.
 
@@ -1314,7 +1314,7 @@ alp.onEvent(envelope => { /* áp dụng; nếu envelope.cursor có thì cập nh
   phần vô hại của các field đó. Văn bản tự do (`instructions`, `body`, `houseRules`,
   `description`) và tên chương trình (`command` không khoảng trắng, có thể là đường dẫn trên host)
   đi nguyên: secret người dùng tự viết vào đó sẽ tới client. Một field mới của core chỉ tới client
-  sau khi được thêm vào `LIBRARY_CONTENT` trong `policy.js`.
+  sau khi được thêm vào `LIBRARY_CONTENT` trong `policy.ts`.
 - Ghi instruction project cần explicit `library.write` và daemon `library.project.write` (#118):
   agents/skills project-only thuần dữ liệu, không executable references, sidecars hoặc host fallback.
   Marker secret không được chấp nhận trong nội dung ghi của policy này.
@@ -1363,9 +1363,9 @@ alp.onEvent(envelope => { /* áp dụng; nếu envelope.cursor có thì cập nh
    - project-only agents/skills CRUD có qua `library.write` + `library.project.write`;
      host `library.skills.set` vẫn bị chặn; `settings.language.set` chỉ host owner (t-a95b, §5.19);
    - test `x-alp` chạy trên schema thật.
-3. Muốn expose thêm method, sửa `policy.js`:
+3. Muốn expose thêm method, sửa `policy.ts`:
    - `status: 'exposed'`, permission, params, scope;
-   - handler trong `connection.js` (`#workspace`/`#project` cho `projectRoot`);
+   - handler trong `connection.ts` (`#workspace`/`#project` cho `projectRoot`);
    - thêm ca vào `OUT_OF_SCOPE` và `IN_SCOPE` của `authorization.test.ts`.
    #118 expose project-only agents/skills với authoritative policy `project-data`;
    teams/mcp/hooks/providers và executable reference vẫn là quản trị.
