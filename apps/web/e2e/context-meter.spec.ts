@@ -2,7 +2,6 @@
 // Codex reporting token usage as Codex does): Paseo's ring in the composer, its colours, its
 // details on hover, and the usage kept across a reload.
 import { expect, test } from '@playwright/test';
-import type { Locator, Page } from '@playwright/test';
 import { startWorld } from './support/world.ts';
 import type { World } from './support/world.ts';
 import { assistant, connect, idle, newSession } from './support/app.ts';
@@ -25,8 +24,7 @@ test('the meter fills with the session\'s context, shows the details, and keeps 
   const composer = page.getByLabel('Message', { exact: true });
   await composer.fill('How big is it? [usage:54000]');
   await composer.press('Enter');
-  // assistant() takes the page only: this call waits for nothing and checks no text (as in the .js spec; not changed here).
-  await (assistant as (page: Page, text: string) => Locator)(page, 'Echo: How big is it?');
+  await expect(assistant(page).last()).toContainText('Echo: How big is it?');
   await idle(page);
   await expect(meter).toHaveAccessibleName('Context window 21% used');
   await expect(meter).toHaveAttribute('data-level', 'normal');
@@ -44,8 +42,7 @@ test('the meter fills with the session\'s context, shows the details, and keeps 
   await expect(details).toBeHidden();
   await composer.fill('Fill it [usage:240000]');
   await composer.press('Enter');
-  // As above: the text is not checked.
-  await (assistant as (page: Page, text: string) => Locator)(page, 'Echo: Fill it');
+  await expect(assistant(page).last()).toContainText('Echo: Fill it');
   await expect(meter).toHaveAccessibleName('Context window 93% used');
   await expect(meter).toHaveAttribute('data-level', 'danger');
 
