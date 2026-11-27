@@ -1,15 +1,15 @@
 import { chmod, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { moveFile } from '../../atomic.ts';
-import { AlpError } from '../../errors.ts';
-import { assertNoSymlinks } from '../../safe-path.ts';
+import { moveFile } from '../../_shared/atomic.ts';
+import { AlpError } from '../../_shared/errors.ts';
+import { assertNoSymlinks } from '../../_shared/safe-path.ts';
 import { seedLibrary } from '../entries/library.ts';
-import { BASES, validatePermissions } from '../../permissions.ts';
+import { BASES, validatePermissions } from '../../project/permissions.ts';
 import { validateSkill } from './skill-validate.ts';
 import { shippedTemplateRoot } from '../../template-path.ts';
-import { validateTeam } from '../../teams.ts';
-import { validateAgentConfig } from '../../validation.ts';
+import { validateTeam } from '../../agents/teams.ts';
+import { validateAgentConfig } from '../../settings/validation.ts';
 
 type PackKind = 'skills' | 'agents' | 'teams';
 type PermissionProfile = { base: string; allow?: string[]; ask?: string[]; deny?: string[] };

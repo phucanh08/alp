@@ -1,10 +1,10 @@
 import { mkdir, readFile, readdir, rmdir, stat, writeFile } from 'node:fs/promises';
-import { moveFile } from '../../atomic.ts';
+import { moveFile } from '../../_shared/atomic.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { AlpError } from '../../errors.ts';
-import { assertNoSymlinks } from '../../safe-path.ts';
-import { describeVerification } from '../../verify.ts';
+import { AlpError } from '../../_shared/errors.ts';
+import { assertNoSymlinks } from '../../_shared/safe-path.ts';
+import { describeVerification } from '../../project/verify.ts';
 import { applyLedger, ledgerAdopt, ledgerPrune, ledgerResolve, readLedger } from '../gate-ledger.ts';
 
 export type TaskType = 'task' | 'bug' | 'feature' | 'chore' | 'epic';

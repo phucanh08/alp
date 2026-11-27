@@ -1,6 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { AlpError } from '../errors.ts';
+import { AlpError } from '../_shared/errors.ts';
 import { DESCRIPTION_CHARS, TASK_TYPES, batch } from './records/tasks.ts';
 import type { Task, TaskType } from './records/tasks.ts';
 

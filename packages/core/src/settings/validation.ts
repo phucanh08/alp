@@ -1,8 +1,8 @@
 import path from 'node:path';
-import { AlpError } from './errors.ts';
-import { EFFORTS, knownModel } from './models.ts';
-import { validatePermissions } from './permissions.ts';
-import { validateVerify } from './verify.ts';
+import { AlpError } from '../_shared/errors.ts';
+import { EFFORTS, knownModel } from '../agents/models.ts';
+import { validatePermissions } from '../project/permissions.ts';
+import { validateVerify } from '../project/verify.ts';
 
 // any: settings files are unvalidated JSON; a value that passes is an object whose fields are then checked one by one
 const object = (value: unknown): value is Record<string, any> => value !== null && typeof value === 'object' && !Array.isArray(value);

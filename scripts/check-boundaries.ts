@@ -38,7 +38,7 @@ const bundledApps: Record<string,string[]> = { '@anhlp/alp-cli': ['@anhlp/alp-ga
 const bundledSources: Record<string,string> = { '@anhlp/alp-cli': `src${path.sep}dashboard${path.sep}` };
 const failures = corePackageProblems(manifest);
 /** The only sources that may name process.execPath directly: the runtime-neutral launch helpers. */
-const EXECPATH_HOMES = new Set(['packages/core/src/packaged.ts', 'packages/core/src/bridges.ts']);
+const EXECPATH_HOMES = new Set(['packages/core/src/launch/packaged.ts', 'packages/core/src/launch/bridges.ts']);
 const supportDirectory = path.join(root, 'test', 'support');
 
 

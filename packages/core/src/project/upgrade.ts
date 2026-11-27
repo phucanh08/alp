@@ -1,13 +1,13 @@
-import { shippedTemplateRoot } from './template-path.ts';
-import { projectProfiles, normalizeAgentProfiles, syncTemplateProfiles } from './profiles.ts';
+import { shippedTemplateRoot } from '../template-path.ts';
+import { projectProfiles, normalizeAgentProfiles, syncTemplateProfiles } from '../agents/profiles.ts';
 import { readFile, writeFile, mkdir, mkdtemp, lstat, readdir, rename, rm, rmdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { initProject } from './init.ts';
-import { validateSettings } from './validation.ts';
-import { resolveDelegation } from './delegation.ts';
-import type { AgentProfilesConfig } from './types.ts';
+import { validateSettings } from '../settings/validation.ts';
+import { resolveDelegation } from '../agents/delegation.ts';
+import type { AgentProfilesConfig } from '../settings/types.ts';
 
 /** What upgradeProject did. */
 export type UpgradeResult = { created: string[]; preserved: string[]; updated: string[]; removed: string[]; customSkills: string[]; customInstructions: string[]; backup: string | undefined };

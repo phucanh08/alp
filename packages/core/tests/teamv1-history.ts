@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// t-cc9e: teamV1 in packages/core/src/upgrade.ts is append-only. A project is upgraded only when the
+// t-cc9e: teamV1 in packages/core/src/project/upgrade.ts is append-only. A project is upgraded only when the
 // role definition it holds is listed there, so a hash that leaves the list strands every project
 // holding that content as customInstructions for ever. This module reads the lists teamV1 has had on
 // main, for teamv1-history.test.ts and for refreshing fixtures/teamv1-history.json:
@@ -14,7 +14,7 @@ import path from 'node:path';
 
 export const ROOT = path.resolve(fileURLToPath(new URL('../../..', import.meta.url)));
 /** Every path upgrade.js has lived at on main, newest first. */
-export const UPGRADE_PATHS = ['packages/core/src/upgrade.ts', 'packages/core/src/upgrade.js', 'src/core/upgrade.js'];
+export const UPGRADE_PATHS = ['packages/core/src/project/upgrade.ts', 'packages/core/src/upgrade.ts', 'packages/core/src/upgrade.js', 'src/core/upgrade.js'];
 
 /** The teamV1 object literal of one upgrade.js text: { path: [hash, …] } in source order; undefined when it has none. */
 /** teamV1: each role definition's path and the hashes of every version of it an upgrade replaces. */

@@ -6,7 +6,7 @@ import { resolveTeam, teamSources } from './teams.ts';
 import { agentSources, builtinText, optionalText } from './resolver.ts';
 import type { AgentSource } from './resolver.ts';
 import type { ResolvedTeam } from './teams.ts';
-import type { AgentModelConfig, AgentProfilesConfig, RawSettings } from './types.ts';
+import type { AgentModelConfig, AgentProfilesConfig, RawSettings } from '../settings/types.ts';
 
 /** A profile's parts, in whichever form a caller holds them. */
 type ProfileLike = { provider?: string; model?: string; effort?: string };
@@ -16,15 +16,15 @@ type ProfileOptions = { root?: string; library?: string; templates?: Record<stri
 
 export const userLibrary = (): string => process.env.ALP_HOME ?? path.join(os.homedir(), '.alp');
 /** Accept the original provider map as well as the model list.
- * @param {import('./types.js').AgentProfilesConfig | undefined} config
- * @returns {Array<import('./types.js').AgentModelConfig>}
+ * @param {import('../settings/types.js').AgentProfilesConfig | undefined} config
+ * @returns {Array<import('../settings/types.js').AgentModelConfig>}
  */
 export const oracleProfiles = (config: AgentProfilesConfig | undefined): AgentModelConfig[] => (config?.profiles ?? [config?.claude, config?.codex].filter(Boolean)) as AgentModelConfig[];
 
 /** The choices for any agent, accepting the earlier single-model configuration.
- * @param {import('./types.js').AgentProfilesConfig | undefined} config
+ * @param {import('../settings/types.js').AgentProfilesConfig | undefined} config
  * @param {string} name
- * @returns {Array<import('./types.js').AgentModelConfig>}
+ * @returns {Array<import('../settings/types.js').AgentModelConfig>}
  */
 export const agentProfiles = (config: AgentProfilesConfig | undefined, name: string): AgentModelConfig[] => {
   if (!config) return [];
@@ -55,7 +55,7 @@ export const anyModel = (profile: ProfileLike | undefined): boolean => profile?.
 export const offers = (profiles: ProfileLike[], model: string): boolean => profiles.some(profile => anyModel(profile) ? model.startsWith(`${profile.provider}:`) && model.length > profile.provider!.length + 1 : profileModel(profile) === model);
 
 /** Only a matching model supplies effort for an explicit choice; otherwise use the first default.
- * @param {Array<import('./types.js').AgentModelConfig>} profiles
+ * @param {Array<import('../settings/types.js').AgentModelConfig>} profiles
  * @param {string | undefined} model
  */
 export const selectedProfile = (profiles: AgentModelConfig[], model: string | undefined): AgentModelConfig | undefined => model === undefined ? profiles.find(config => !anyModel(config)) : profiles.find(config => !anyModel(config) && (!config.model || profileModel(config) === model || (!model.includes(':') && config.model === model)));

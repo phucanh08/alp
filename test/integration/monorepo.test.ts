@@ -63,7 +63,7 @@ test('the boundary checker rejects process.execPath outside the runtime-neutral 
   await write('pnpm-workspace.yaml', `packages: ${JSON.stringify(['packages/core', 'packages/daemon'])}\n`);
   await write('packages/core/package.json', JSON.stringify({ name: '@anhlp/alp-core', version: '0.0.0' }));
   await write('packages/daemon/package.json', JSON.stringify({ name: '@anhlp/alp-daemon', version: '0.0.0' }));
-  await write('packages/core/src/packaged.ts', "export const self = () => process.execPath;\n");
+  await write('packages/core/src/launch/packaged.ts', "export const self = () => process.execPath;\n");
   await write('packages/daemon/src/ok.ts', "export function start({ execPath = process.execPath } = {}) { return execPath; }\nexport const shown = { nodePath: process.execPath /* alp-allow-execpath: reported only */ };\n");
   await write('packages/daemon/tests/spawn.test.js', "import { spawn } from 'node:child_process';\nspawn(process.execPath, ['x.js']);\n");
   const check = () => { const result = spawnSync(process.execPath, ['scripts/check-boundaries.ts', '--root', fixture], { cwd: root, encoding: 'utf8' }); return { status: result.status, output: (result.stdout + result.stderr).replaceAll('\\', '/') }; };

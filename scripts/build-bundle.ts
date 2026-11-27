@@ -217,7 +217,7 @@ export async function buildBundle({ platform, out, build = true, nodeCache = pat
     await mkdir(path.join(directory, 'bin'));
     if (windows) await writeFile(path.join(directory, 'bin/alp.cmd'), WINDOWS_LAUNCHER);
     else { await writeFile(path.join(directory, 'bin/alp'), POSIX_LAUNCHER); await chmod(path.join(directory, 'bin/alp'), 0o755); }
-    // 5. The native alpd: alp starts it instead of alpd.js when it is there (packages/core/src/packaged.ts daemonEntry).
+    // 5. The native alpd: alp starts it instead of alpd.js when it is there (packages/core/src/launch/packaged.ts daemonEntry).
     if (nativeDaemon) await buildNativeDaemon({ platform, out: path.join(directory, 'bin/alpd'), version, ...(bun ? { bun } : {}) });
     await writeFile(path.join(directory, 'alp-bundle.json'), `${JSON.stringify({ name: 'alp', version, platform, node: node.version, daemon: nativeDaemon ? 'native' : 'node' }, null, 2)}\n`);
     await copyFile(path.join(ROOT, 'LICENSE'), path.join(directory, 'LICENSE'));

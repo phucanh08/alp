@@ -1,6 +1,6 @@
-import { AlpError } from './errors.ts';
-import { validateResolvedAgent } from './validation.ts';
-import type { ResolvedAgent } from './types.ts';
+import { AlpError } from '../_shared/errors.ts';
+import { validateResolvedAgent } from '../settings/validation.ts';
+import type { ResolvedAgent } from '../settings/types.ts';
 
 export type CapabilitySupport = 'native' | 'emulated' | 'unsupported';
 export interface AdapterCapabilities {

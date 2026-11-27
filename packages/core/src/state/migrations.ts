@@ -1,7 +1,7 @@
 import { readdir, readFile, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { AlpError } from './errors.ts';
-import { writeAtomic } from './atomic.ts';
+import { AlpError } from '../_shared/errors.ts';
+import { writeAtomic } from '../_shared/atomic.ts';
 import { STATE_SCHEMA, assertStateSupported, migrationFile, readStateSchema, stateDir, writeStateSchema } from './state-schema.ts';
 import { STATE_UNITS, automaticBackup, restoreBackup } from './backup.ts';
 

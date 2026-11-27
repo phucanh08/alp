@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { alpHome } from '../library/entries/library.ts';
-import { AlpError } from '../errors.ts';
+import { AlpError } from '../_shared/errors.ts';
 import type { GateChannel, Task, TaskGate } from './records/tasks.ts';
 
 /** One ledgered human gate: when ALP opened it, and the clear ALP itself recorded. */

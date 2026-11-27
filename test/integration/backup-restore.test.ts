@@ -20,7 +20,7 @@ import { connect, lockAlive, readLock } from '../../packages/client/dist/index.j
 const ALPD = fileURLToPath(new URL('../../dist/alpd.js', import.meta.url));
 const CLI = fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url));
 const FAKE_CODEX = fileURLToPath(new URL('../../packages/daemon/tests/support/fake-codex.js', import.meta.url));
-const BACKUP_MODULE = fileURLToPath(new URL('../../packages/core/dist/backup.js', import.meta.url));
+const BACKUP_MODULE = fileURLToPath(new URL('../../packages/core/dist/state/backup.js', import.meta.url));
 const MODEL = 'codex:gpt-5.6-sol';
 const skip = process.platform === 'win32' && 'POSIX processes and sockets only';
 const execute = promisify(execFile);

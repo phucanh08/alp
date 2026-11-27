@@ -575,7 +575,7 @@ const MODEL_ID = new RegExp(`^(?:(?:codex|claude|antigravity):${VISIBLE}+|acp:(?
  * A model id as alpd reads spec.model (packages/runtime/src/resolve.ts) and library.models lists
  * them: `<runtime>:<model>` for codex, claude and antigravity (catalogue ids such as
  * `claude:claude-opus-4-8[1m]`), `acp:<provider>` or `acp:<provider>/<model>`, where a provider id
- * is a library file name ([\w.-], packages/core/src/providers.ts) and its model any id without
+ * is a library file name ([\w.-], packages/core/src/agents/providers.ts) and its model any id without
  * whitespace the provider lists, or a bare catalogue id. At most 256 characters. A model id is
  * never a path to the gateway or alpd: it chooses a provider by name and is passed to it.
  */
