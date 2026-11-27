@@ -208,6 +208,9 @@ test('terminal limits: the schema bounds are TERMINAL\'s, hello limits are valid
   for (const method of ['terminal.attach', 'terminal.input', 'terminal.resize', 'terminal.close']) assert.equal(methods.methods[method]['x-alp'].scope.kind, 'terminal', method);
   assert.ok(isTerminalId(`term_${'a'.repeat(32)}`));
   for (const id of ['term_', `term_${'A'.repeat(32)}`, '../term', 42]) assert.ok(!isTerminalId(id), String(id));
+  // Type level (checked by `pnpm run check:test`): a string that fails the guard is still a string, not never.
+  const stored: string = 'not-a-terminal';
+  if (!isTerminalId(stored)) assert.equal(stored.length, 14);
 });
 
 test('AGENT_NAME: one pattern for principal.agent in daemon.hello and a gateway credential\'s agent', async () => {
