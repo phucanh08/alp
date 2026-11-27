@@ -1,6 +1,8 @@
 // Pins what alpd answers for the RPC methods no other daemon test calls (t-8cd6.5): session.log,
 // session.preview, assignment.recall, registry.worktree, project.list, workspace.get,
-// workspace.worktree.options/create/remove and terminal.watch/unwatch, with and without a home.
+// workspace.worktree.options/create/remove and terminal.watch/unwatch, with and without a home, and
+// the user-only refusals of an agent's connection (terminal.create/attach/input, session.fork/rewind/
+// reload, question.answer) over the socket.
 // It guards the split of server.ts into <domain>/rpc/handlers.ts: each method keeps its answer,
 // its refusal and the wrapper (registryCall, terminalCall) that words that refusal.
 import test from 'node:test';
@@ -9,11 +11,13 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
 import { initProject } from '@anhlp/alp-core/init';
 import { seedLibrary } from '@anhlp/alp-core/library';
 import { fakeTransport } from '../../../test/support/fake-agent.ts';
+import { teardown } from '../../../test/support/teardown.ts';
 
 // `any`: alpd's answers and JSON-RPC errors are JSON; the test reads the fields it asserts on.
 type Json = any;
@@ -91,4 +95,48 @@ test('with a home, the registry, worktree and terminal methods answer as before'
   }
   assert.deepEqual(await refusal(client.request('terminal.watch', { workspaceId })), { code: 1005, message: 'The host has not allowed remote terminals (alp terminal allow)', reason: 'terminal_disabled' });
   assert.deepEqual(await client.request('terminal.unwatch', {}), { closed: true });
+});
+
+// A connection an ALP agent opened (ALP_AGENT_SESSION at connect) is refused what only the user may
+// do, before anything else is checked: alpd here has no home and no store, so the owner meets the
+// next check instead (no terminals, no conversations), while the agent meets user_only first.
+async function connectAs(socket: string, agent: boolean) {
+  const saved = process.env.ALP_AGENT_SESSION;
+  if (agent) process.env.ALP_AGENT_SESSION = '1'; else delete process.env.ALP_AGENT_SESSION;
+  try { return await connect(socket, { name: 'rpc-wiring-test', version: '0' }); }
+  finally { if (saved === undefined) delete process.env.ALP_AGENT_SESSION; else process.env.ALP_AGENT_SESSION = saved; }
+}
+
+test('an agent connection is refused the user-only methods before their other checks', { skip: process.platform === 'win32' ? 'unix socket path' : false }, async t => {
+  const defer = teardown(t);
+  const base = await mkdtemp(path.join(tmpdir(), 'alp-rpc-agent-'));
+  defer(() => rm(base, { recursive: true, force: true }));
+  const library = path.join(base, 'library');
+  await mkdir(library, { recursive: true, mode: 0o700 });
+  const runtime = createAlpRuntime({ libraryDir: library, supervisor: false, transport: fakeTransport([]) });
+  const server = createDaemonServer({ runtime, socketPath: daemonPaths(base).socket, version: 'test' });
+  await server.listen();
+  defer(async () => { await server.close(); await runtime.shutdown(); });
+  const owner = await connectAs(daemonPaths(base).socket, false);
+  defer(() => owner.close());
+  await owner.request('daemon.hello', { protocolVersion: 1 });
+  const agent = await connectAs(daemonPaths(base).socket, true);
+  defer(() => agent.close());
+  await agent.request('daemon.hello', { protocolVersion: 1 });
+  const userOnly = (method: string) => ({ code: 1003, message: `${method} is the user's; this connection was opened by an ALP agent`, reason: 'user_only' });
+  const noTerminals = { code: 1005, message: 'This alpd has no home: it serves no terminals', reason: 'terminal_unsupported' };
+  for (const [method, params] of [['terminal.create', { workspaceId: 'w', cols: 80, rows: 24, requestId: 'c' }], ['terminal.attach', { terminalId: 'term_0123456789abcdef0123456789abcdef' }], ['terminal.input', { terminalId: 'term_0123456789abcdef0123456789abcdef', data: 'x' }]] as const) {
+    assert.deepEqual(await refusal(agent.request(method, params)), userOnly(method), method);
+    assert.deepEqual(await refusal(owner.request(method, params)), noTerminals, method);
+  }
+  for (const [method, params, owners] of [
+    ['session.fork', { sessionId: 's', requestId: 'f', ifGeneration: '0123456789abcdef0123456789abcdef' }, 'This alpd does not fork conversations (capability session.fork is not listed)'],
+    ['session.rewind', { sessionId: 's', requestId: 'r', ifGeneration: '0123456789abcdef0123456789abcdef', beforeTurnId: 't' }, 'This alpd does not rewind conversations (capability session.rewind is not listed)'],
+    ['session.reload', { sessionId: 's', requestId: 'l', ifGeneration: '0123456789abcdef0123456789abcdef' }, 'This alpd does not reload sessions (capability session.reload is not listed)'],
+  ] as const) {
+    assert.deepEqual(await refusal(agent.request(method, params)), userOnly(method), method);
+    assert.deepEqual(await refusal(owner.request(method, params)), { code: -32601, message: owners, reason: undefined }, method);
+  }
+  assert.deepEqual(await refusal(agent.request('question.answer', { questionId: 'q', text: 'yes' })), { code: 1003, message: 'Only the user answers a question; this connection was opened by an ALP agent', reason: 'user_only' });
+  assert.deepEqual(await refusal(owner.request('question.answer', { questionId: 'q', text: 'yes' })), { code: 1001, message: 'No question q waits for an answer', reason: undefined });
 });
