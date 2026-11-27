@@ -1,0 +1,62 @@
+build fail: alpd is not built (<dir>/alpd.js); run npm run build
+codex fail: codex-cli 9.9.9 at <dir>/bin/codex is not logged in; run codex login
+claude ok: 9.9.9 (Claude Code) at <dir>/bin/claude, logged in
+antigravity warn: agy not found on PATH; antigravity agents cannot run (set ALP_ANTIGRAVITY_BIN to its path)
+home warn: ALP_HOME (<dir>/home) is inside the temp directory, which sandboxed sessions may write: a tool could change staged attachment copies before they are read; keep ALP_HOME outside it (default ~/.alp)
+disk <machine>
+alpd warn: not running, and left alpd.lock behind; the last alpd stopped unexpectedly, and the next start continues its work
+  fix: remove <dir>/home/alpd.lock
+service fail: the <kind> service <service> runs files that are gone; run alp daemon install again
+  - <dir>/gone/node
+  - <dir>/gone/alpd.js
+state warn: 1 of 2 session records in <dir>/home/state cannot be read; alpd skips it and that session is not listed (ALP_RECORD_UNREADABLE)
+  - bad.json
+  - doctor never deletes them: copy or repair the files by hand
+schema info: state schema 1: alpd migrates it to <schema> at its next start, after saving a backup in <dir>/home/backups
+migration warn: a state migration was cut short; alpd continues it at its next start, or puts the state back if it fails
+restore warn: a restore was cut short; alpd or the next alp restore moves the earlier data back first
+startup fail: the last alpd failed at 2026-01-01T00:00:00.000Z: ALP_IPC_LISTEN_FAILED, alpd failed to start
+  - Error EADDRINUSE: listen EADDRINUSE
+  - log: <dir>/home/logs/alpd.log
+  hint: fix the cause and run alp daemon start; its work is kept and continued
+persistence log warn: 1 problem logged since alpd was last ready: ALP_PERSISTENCE_WRITE_FAILED x1
+  - 2026-01-01T00:00:00.000Z alpd ALP_PERSISTENCE_WRITE_FAILED record s1 failed [session s1]
+  - alpd could not read or write its state; check free space and the permissions of the state directory
+ipc log warn: 2 problems logged since alpd was last ready: ALP_IPC_PARSE_ERROR x1, ALP_IPC_LISTEN_FAILED x1
+  - 2026-01-01T00:00:00.000Z alpd.ipc ALP_IPC_PARSE_ERROR a client sent a line that is not JSON
+  - 2026-01-01T00:00:00.000Z alpd ALP_IPC_LISTEN_FAILED alpd failed to start
+  - clients had trouble talking to alpd; alp daemon restart reopens the endpoint
+provider log warn: 1 problem logged since alpd was last ready: ALP_PROVIDER_FAILED x1
+  - 2026-01-01T00:00:00.000Z runtime ALP_PROVIDER_FAILED the codex session failed [session s2]
+  - a runtime process failed or would not start; the runtime checks above say whether it is installed and logged in
+failed sessions info: 1 session ended in failure; kept, nothing is deleted
+  - 2026-01-01T00:00:00.000Z peer s2 (codex) login_required codex says: log in
+sandbox ok: Claude sessions run Bash in an OS sandbox that holds their mode
+permissions warn: 11 entries under <dir>/home readable by others; they hold task briefs, results and settings
+  - 0755 <dir>/home
+  - 0644 <dir>/home/settings.json
+  - 0644 <dir>/home/alpd.lock
+  - 0644 <dir>/home/role-skills.json
+  - 0755 <dir>/home/state
+  - 0644 <dir>/home/state/alpd.running
+  - 0644 <dir>/home/state/live.json
+  - 0644 <dir>/home/state/migration.json
+  - 0755 <dir>/home/state/sessions
+  - 0755 <dir>/home/logs
+  - 0644 <dir>/home/logs/alpd.log
+  fix: remove group and other access from them
+user settings fail: alpd ignores <dir>/home/settings.json: unknown setting 'notASetting'; known settings are language, permissions, limits, recovery, dashboard, web, curate
+skills warn: <dir>/home/role-skills.json lists 1 skill the library lacks; agents start without them
+  - peer: absent
+skill-format warn: 1 library skill does not fully meet the skill format; they still load (alp skill check <name> explains)
+  - tidy: DESCRIPTION_SHORT, DESCRIPTION_TRIGGER
+providers warn: 1 ACP provider (acme); 1 cannot start
+  - acme: acme-agent is not found
+  - ALP has no sandbox around an ACP agent: it holds the session's mode only by answering the permission requests the agent sends, so a command the agent runs without asking runs unchecked
+  - ALP cannot steer an ACP agent mid-turn (mail waits for the turn to end), resumes its sessions only when it supports session/load, and cannot recall them or give them review copies
+live work warn: 1 interrupted assignment belong to projects that no longer exist
+  - peer a1 in <dir>/vanished
+  fix: drop them from <dir>/home/state/live.json, keeping a copy beside it
+settings ok: <dir>/project/.alp/settings.json
+agents ok: <n> agents resolve: <agents>
+agents fail: defaultAgent nobody is not an agent of this project
