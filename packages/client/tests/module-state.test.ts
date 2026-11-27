@@ -30,7 +30,7 @@ test.afterEach(() => {
 test('a boot id set through the entry is the one the lock, lockAlive and integrationAlive use', async (t) => {
   const defer = teardown(t);
   const home = await mkdtemp(path.join(os.tmpdir(), 'alp-module-state-'));
-  defer(() => rm(home, { recursive: true, force: true }));
+  defer(() => rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   _setBootIdForTest('module-state-boot');
   const lock = await acquireDaemonLock(home, { version: 'test', protocolVersion: 1, socket: path.join(home, 'test.sock') });
   defer(() => releaseDaemonLock(home));
@@ -46,7 +46,7 @@ test('a boot id set through the entry is the one the lock, lockAlive and integra
 test('a holdOps.taken replaced through the entry is the one lockAlive and readDaemonLifecycle consult', async (t) => {
   const defer = teardown(t);
   const home = await mkdtemp(path.join(os.tmpdir(), 'alp-module-state-'));
-  defer(() => rm(home, { recursive: true, force: true }));
+  defer(() => rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   const original = holdOps.taken;
   const asked: string[] = [];
   holdOps.taken = (file: string) => { asked.push(file); return false; };
