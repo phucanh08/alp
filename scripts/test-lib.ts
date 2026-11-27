@@ -214,6 +214,23 @@ export function testRunEnv({ env = process.env, user, scratch, platform = proces
 }
 
 /**
+ * The longest temp directory a test run nests its scratch in. Unix socket paths must stay below 104
+ * bytes on macOS (sun_path), and the deepest ones tests make under the scratch are about 55 bytes
+ * (`/alpt-XXXXXX/alp-dashboard-<uid>-<12 hex>/token.sock`); macOS's own per-user temp dir is 48.
+ */
+export const SCRATCH_BASE_BYTES = 48;
+
+/**
+ * Where a test run makes its throwaway directories: the temp dir, or `/tmp` on Unix when the temp
+ * dir is longer than SCRATCH_BASE_BYTES (a caller's long private TMPDIR), so socket paths under the
+ * scratch still fit. Windows uses named pipes, so its temp dir is kept.
+ */
+export function scratchBase(tmp: string = os.tmpdir(), { platform = process.platform, exists = existsSync }: { platform?: NodeJS.Platform; exists?: (directory: string) => boolean } = {}) {
+  if (platform === 'win32' || Buffer.byteLength(tmp) <= SCRATCH_BASE_BYTES || !exists('/tmp')) return tmp;
+  return '/tmp';
+}
+
+/**
  * Runs the files with `node --test` against a throwaway ALP_HOME and TMPDIR, without the caller's
  * ALP session variables, so no run touches the user's ~/.alp or leaves directories in the temp dir.
  * Every run also gets a throwaway HOME/USERPROFILE/XDG profile, no caller ALP_*_BIN, provider
@@ -230,21 +247,23 @@ export function testRunEnv({ env = process.env, user, scratch, platform = proces
 export function runNodeTests(files: string[], { extra = [], fileTimeoutMs = 300_000 }: { extra?: string[]; fileTimeoutMs?: number; privateHome?: boolean; } = {}) {
   if (!files.length) throw new Error('no test files selected');
   if (!Number.isSafeInteger(fileTimeoutMs) || fileTimeoutMs <= 0 || fileTimeoutMs > 2_147_483_647) throw new Error('fileTimeoutMs must be a positive timer interval');
-  const home = mkdtempSync(path.join(os.tmpdir(), 'alp-test-'));
-  const user = mkdtempSync(path.join(os.tmpdir(), 'alpu-'));
+  // Short: Unix socket paths under these must stay below 104 bytes on macOS, also when the caller's
+  // TMPDIR is long (scratchBase).
+  const base = scratchBase();
+  const home = mkdtempSync(path.join(base, 'alp-test-'));
+  const user = mkdtempSync(path.join(base, 'alpu-'));
   // Every temporary directory the tests (and alpd, providers and Node under them) make goes in one
-  // scratch directory that is removed afterwards, also when a test forgets its own (t-bf7f). Short:
-  // Unix socket paths under it must stay below 104 bytes on macOS.
-  const scratch = mkdtempSync(path.join(os.tmpdir(), 'alpt-'));
+  // scratch directory that is removed afterwards, also when a test forgets its own (t-bf7f).
+  const scratch = mkdtempSync(path.join(base, 'alpt-'));
   const retain = path.join(scratch, 'cleanup-unconfirmed');
   // Fail closed if the coordinator crashes or is interrupted before completion.
   writeFileSync(retain, 'cleanup pending\n');
   try {
     // alpd under test never asks the real providers for models (t-e5ee); a test that wants it unsets this.
     // A per-file hard watchdog also cuts off leaked handles after five minutes.
-    const base = testRunEnv({ user, scratch });
-    for (const directory of [base.APPDATA, base.LOCALAPPDATA, ...Object.keys(XDG_BASE_DIRECTORIES).map(name => base[name])]) mkdirSync((directory as string), { recursive: true }); // homelessEnv sets every one of them
-    const result = spawnSync(process.execPath, [path.join(ROOT, 'scripts/test-file-watchdog.ts'), JSON.stringify({ files, extra, fileTimeoutMs })], { cwd: ROOT, stdio: 'inherit', env: { ALP_MODEL_CATALOG: 'static', ...base, ALP_TEST_RETAIN: retain, ALP_HOME: home, TMPDIR: scratch, TMP: scratch, TEMP: scratch } });
+    const runEnv = testRunEnv({ user, scratch });
+    for (const directory of [runEnv.APPDATA, runEnv.LOCALAPPDATA, ...Object.keys(XDG_BASE_DIRECTORIES).map(name => runEnv[name])]) mkdirSync((directory as string), { recursive: true }); // homelessEnv sets every one of them
+    const result = spawnSync(process.execPath, [path.join(ROOT, 'scripts/test-file-watchdog.ts'), JSON.stringify({ files, extra, fileTimeoutMs })], { cwd: ROOT, stdio: 'inherit', env: { ALP_MODEL_CATALOG: 'static', ...runEnv, ALP_TEST_RETAIN: retain, ALP_HOME: home, TMPDIR: scratch, TMP: scratch, TEMP: scratch } });
     if (result.error || result.signal || result.status === null) writeFileSync(retain, 'coordinator failed\n');
     return result.status ?? 1;
   } finally {
