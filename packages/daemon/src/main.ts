@@ -9,14 +9,14 @@ import { attachmentStageDir, createAlpRuntime, reclaimCopies, reclaimWorktrees, 
 import type { LeftWorktree } from '@anhlp/alp-runtime/index';
 import { createDaemonServer } from './server.ts';
 import { acquireLock, heartbeat, releaseLock, updateLock } from './lock.ts';
-import { createStore } from './store.ts';
-import { createDiskGuard, guardOutput, isDiskError } from './disk.ts';
-import { readAttachmentConfig } from './attachments.ts';
+import { createStore } from './persistence/store.ts';
+import { createDiskGuard, guardOutput, isDiskError } from './persistence/disk.ts';
+import { readAttachmentConfig } from './attachments/attachments.ts';
 import { validateUserSettings } from '@anhlp/alp-core/validation';
 import { clearRestoredMarker, readRestoredMarker, recoverInterruptedRestore } from '@anhlp/alp-core/backup';
 import { migrateState } from '@anhlp/alp-core/migrations';
 import { createLogger } from '@anhlp/alp-core/log';
-import { createModelCatalog } from './model-catalog.ts';
+import { createModelCatalog } from './catalog/model-catalog.ts';
 import { selfCommand, selfEntry } from '@anhlp/alp-core/packaged';
 
 declare const __ALP_VERSION__: string;

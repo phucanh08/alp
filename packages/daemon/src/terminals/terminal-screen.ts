@@ -1,6 +1,6 @@
 import headless from '@xterm/headless';
 import { ERROR } from '@anhlp/alp-protocol';
-import { RpcError } from '../rpc-error.ts';
+import { RpcError } from '../rpc/rpc-error.ts';
 
 // Exact xterm 6.0.0, also used by Paseo 0.12. No raw replay reconstruction: one parser from spawn.
 // Bound both queued work and lifetime input (including OSC/combining payloads hidden from rows).

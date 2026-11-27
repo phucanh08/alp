@@ -174,7 +174,7 @@ test('production daemon catalog wiring isolates malformed providers, exposes err
 });
 
 test('production provider loader deduplicates unchanged errors and reports them again after recovery', async t => {
-  const { createModelCatalog } = await import('../dist/model-catalog.js');
+  const { createModelCatalog } = await import('../dist/catalog/model-catalog.js');
   const { writeFile } = await import('node:fs/promises');
   const home = await mkdtemp(path.join(tmpdir(), 'alpd-catalog-errors-'));
   t.after(() => rm(home, { recursive: true, force: true }));

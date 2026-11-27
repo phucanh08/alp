@@ -15,7 +15,7 @@ export type UsageSetting = { enabled: boolean, host: string };
 export type OwnerWorkspace = { id: string, projectId: string, directory: string, title: string | null, pinnedAt: string | null, archivedAt: string | null, labels: string[], createdAt: string, managedWorktree: boolean, sessions: number };
 export type OwnerRegistry = { revision: number, projects: Array<{ id: string, root: string, customName?: string, addedAt: string }>, workspaces: OwnerWorkspace[], labels: Array<{ name: string, color: string }> };
 
-/** Label colours alpd's registry accepts (packages/daemon/src/registry.ts). */
+/** Label colours alpd's registry accepts (packages/daemon/src/workspaces/registry.ts). */
 export const LABEL_COLORS = Object.freeze(['violet', 'sky', 'emerald', 'orange', 'pink', 'indigo', 'teal', 'red', 'amber', 'blue']);
 
 const requestId = () => globalThis.crypto.randomUUID();

@@ -30,11 +30,11 @@
     },
     "./attachments": {
       "alp-source": {
-        "types": "./src/attachments.ts",
-        "default": "./src/attachments.ts"
+        "types": "./src/attachments/attachments.ts",
+        "default": "./src/attachments/attachments.ts"
       },
-      "types": "./dist/attachments.d.ts",
-      "default": "./dist/attachments.js"
+      "types": "./dist/attachments/attachments.d.ts",
+      "default": "./dist/attachments/attachments.js"
     },
     "./terminals": {
       "alp-source": {
@@ -46,35 +46,35 @@
     },
     "./conversation": {
       "alp-source": {
-        "types": "./src/conversation.ts",
-        "default": "./src/conversation.ts"
+        "types": "./src/sessions/conversation.ts",
+        "default": "./src/sessions/conversation.ts"
       },
-      "types": "./dist/conversation.d.ts",
-      "default": "./dist/conversation.js"
+      "types": "./dist/sessions/conversation.d.ts",
+      "default": "./dist/sessions/conversation.js"
     },
     "./lifecycle": {
       "alp-source": {
-        "types": "./src/lifecycle.ts",
-        "default": "./src/lifecycle.ts"
+        "types": "./src/persistence/lifecycle.ts",
+        "default": "./src/persistence/lifecycle.ts"
       },
-      "types": "./dist/lifecycle.d.ts",
-      "default": "./dist/lifecycle.js"
+      "types": "./dist/persistence/lifecycle.d.ts",
+      "default": "./dist/persistence/lifecycle.js"
     },
     "./files": {
       "alp-source": {
-        "types": "./src/files.ts",
-        "default": "./src/files.ts"
+        "types": "./src/workspaces/files.ts",
+        "default": "./src/workspaces/files.ts"
       },
-      "types": "./dist/files.d.ts",
-      "default": "./dist/files.js"
+      "types": "./dist/workspaces/files.d.ts",
+      "default": "./dist/workspaces/files.js"
     },
     "./git": {
       "alp-source": {
-        "types": "./src/git.ts",
-        "default": "./src/git.ts"
+        "types": "./src/workspaces/git.ts",
+        "default": "./src/workspaces/git.ts"
       },
-      "types": "./dist/git.d.ts",
-      "default": "./dist/git.js"
+      "types": "./dist/workspaces/git.d.ts",
+      "default": "./dist/workspaces/git.js"
     },
     "./lock": {
       "alp-source": {
@@ -102,27 +102,27 @@
     },
     "./store": {
       "alp-source": {
-        "types": "./src/store.ts",
-        "default": "./src/store.ts"
+        "types": "./src/persistence/store.ts",
+        "default": "./src/persistence/store.ts"
       },
-      "types": "./dist/store.d.ts",
-      "default": "./dist/store.js"
+      "types": "./dist/persistence/store.d.ts",
+      "default": "./dist/persistence/store.js"
     },
     "./registry": {
       "alp-source": {
-        "types": "./src/registry.ts",
-        "default": "./src/registry.ts"
+        "types": "./src/workspaces/registry.ts",
+        "default": "./src/workspaces/registry.ts"
       },
-      "types": "./dist/registry.d.ts",
-      "default": "./dist/registry.js"
+      "types": "./dist/workspaces/registry.d.ts",
+      "default": "./dist/workspaces/registry.js"
     },
     "./worktrees": {
       "alp-source": {
-        "types": "./src/worktrees.ts",
-        "default": "./src/worktrees.ts"
+        "types": "./src/workspaces/worktrees.ts",
+        "default": "./src/workspaces/worktrees.ts"
       },
-      "types": "./dist/worktrees.d.ts",
-      "default": "./dist/worktrees.js"
+      "types": "./dist/workspaces/worktrees.d.ts",
+      "default": "./dist/workspaces/worktrees.js"
     }
   },
   "engines": {

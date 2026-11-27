@@ -10,7 +10,7 @@ import type { GitChange, GitCompare, GitDiffFile, GitDiffHunk, GitDiffPage, GitF
 import { FileAccessError, PRIVATE_KEY, likelyBinary, readConfinedFile, relativeSegments } from './files.ts';
 import { IgnoreUnknown, resolveGit, searchPathOutside } from './gitignore.ts';
 import { RegistryError } from './registry.ts';
-import { RpcError } from './rpc-error.ts';
+import { RpcError } from '../rpc/rpc-error.ts';
 
 /**
  * `workspace.git.status` and `workspace.git.diff` (docs/protocol/alp-json-rpc-v1.md §12.5): the
