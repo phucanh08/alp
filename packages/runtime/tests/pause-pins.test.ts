@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { fakeTransport, tree, until } from '../../../test/support/fake-agent.ts';
+import { teardown } from '../../../test/support/teardown.ts';
 import type { FakeAgent } from '../../../test/support/fake-agent.ts';
 
 // Narrow pins for the pause, limit and usage branches no other test reached (t-8cd6.9, S5 domain 1).
@@ -115,44 +116,43 @@ test('a pause of all ALP that arrives while a continuation waits in the queue ke
 });
 
 test('a limit pause without a reset time stays when the runtime cannot be asked: no provider, a probe that fails, a close that fails', async t => {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-pause-pins-'));
-  let missing: ReturnType<typeof createAlpRuntime> | undefined;
-  let failing: ReturnType<typeof createAlpRuntime> | undefined;
-  let garbled: ReturnType<typeof createAlpRuntime> | undefined;
-  // One hook: the runtimes stop writing the pause file before the directory goes.
-  t.after(async () => { await missing?.shutdown(); await failing?.shutdown(); await garbled?.shutdown(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });
+  // Undone last: the runtimes below stop writing the pause file first.
+  defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const file = path.join(directory, 'pause.json');
   await writeFile(file, JSON.stringify({ runtimes: { codex: { since: new Date().toISOString(), by: 'alpd', reason: 'Codex usage limit reached' } } }));
   // The provider cannot be made at all.
   let made = 0;
-  missing = createAlpRuntime({ language: 'English', supervisor: false, pauseFile: file, transport: () => { made++; throw new Error('codex is not installed'); } });
-  await until(() => missing!.pauses().runtimes.codex?.checkedAt, 'the start check');
+  const missing = createAlpRuntime({ language: 'English', supervisor: false, pauseFile: file, transport: () => { made++; throw new Error('codex is not installed'); } });
+  defer(() => missing.shutdown());
+  await until(() => missing.pauses().runtimes.codex?.checkedAt, 'the start check');
   assert.ok(made >= 1);
-  assert.equal(missing!.pauses().runtimes.codex!.by, 'alpd');
-  await missing!.shutdown();
-  missing = undefined;
+  assert.equal(missing.pauses().runtimes.codex!.by, 'alpd');
+  await missing.shutdown();
   // The probe reports a failure while it starts, and its close fails.
   const probes: FakeAgent[] = [];
   const factory = fakeTransport(probes);
-  failing = createAlpRuntime({ language: 'English', supervisor: false, pauseFile: file, transport: (...args) => {
+  const failing = createAlpRuntime({ language: 'English', supervisor: false, pauseFile: file, transport: (...args) => {
     const agent = (factory as (...passed: unknown[]) => FakeAgent)(...args);
     agent.initialize = async () => { agent.failure?.(new Error('probe stopped')); throw new Error('probe stopped'); };
     agent.close = async () => { throw new Error('close failed'); };
     return agent;
   } });
-  await until(() => failing!.pauses().runtimes.codex?.checkedAt, 'the start check');
+  defer(() => failing.shutdown());
+  await until(() => failing.pauses().runtimes.codex?.checkedAt, 'the start check');
   assert.ok(probes.length >= 1);
-  assert.equal(failing!.pauses().runtimes.codex!.by, 'alpd');
-  assert.equal(failing!.pauses().runtimes.codex!.resetsAt, undefined);
-  await failing!.shutdown();
-  failing = undefined;
+  assert.equal(failing.pauses().runtimes.codex!.by, 'alpd');
+  assert.equal(failing.pauses().runtimes.codex!.resetsAt, undefined);
+  await failing.shutdown();
   // A report the limit check cannot read (windows that are not a list) counts as no answer.
   const readers: FakeAgent[] = [];
   const reader = fakeTransport(readers);
-  garbled = createAlpRuntime({ language: 'English', supervisor: false, pauseFile: file, transport: (...args) => Object.assign((reader as (...passed: unknown[]) => FakeAgent)(...args), { limits: { available: true, windows: 5 } }) });
-  await until(() => garbled!.pauses().runtimes.codex?.checkedAt, 'the start check');
+  const garbled = createAlpRuntime({ language: 'English', supervisor: false, pauseFile: file, transport: (...args) => Object.assign((reader as (...passed: unknown[]) => FakeAgent)(...args), { limits: { available: true, windows: 5 } }) });
+  defer(() => garbled.shutdown());
+  await until(() => garbled.pauses().runtimes.codex?.checkedAt, 'the start check');
   assert.ok(readers.length >= 1);
-  assert.equal(garbled!.pauses().runtimes.codex!.by, 'alpd');
+  assert.equal(garbled.pauses().runtimes.codex!.by, 'alpd');
 });
 
 test('the reset time of a limit: Claude\'s from its last report; Codex\'s unknown when its context cannot say', async t => {
