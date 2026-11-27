@@ -1,4 +1,4 @@
-import { signalShell, spawnShell } from './shell.ts';
+import { signalShell, spawnShell } from '../_shared/shell.ts';
 import type { Readable } from 'node:stream';
 
 const OUTPUT_LIMIT = 64 * 1024;

@@ -12,27 +12,27 @@
   "exports": {
     "./adapter": {
       "alp-source": {
-        "types": "./src/adapter.ts",
-        "default": "./src/adapter.ts"
+        "types": "./src/agents/adapter.ts",
+        "default": "./src/agents/adapter.ts"
       },
-      "types": "./dist/adapter.d.ts",
-      "default": "./dist/adapter.js"
+      "types": "./dist/agents/adapter.d.ts",
+      "default": "./dist/agents/adapter.js"
     },
     "./atomic": {
       "alp-source": {
-        "types": "./src/atomic.ts",
-        "default": "./src/atomic.ts"
+        "types": "./src/_shared/atomic.ts",
+        "default": "./src/_shared/atomic.ts"
       },
-      "types": "./dist/atomic.d.ts",
-      "default": "./dist/atomic.js"
+      "types": "./dist/_shared/atomic.d.ts",
+      "default": "./dist/_shared/atomic.js"
     },
     "./backup": {
       "alp-source": {
-        "types": "./src/backup.ts",
-        "default": "./src/backup.ts"
+        "types": "./src/state/backup.ts",
+        "default": "./src/state/backup.ts"
       },
-      "types": "./dist/backup.d.ts",
-      "default": "./dist/backup.js"
+      "types": "./dist/state/backup.d.ts",
+      "default": "./dist/state/backup.js"
     },
     "./beads": {
       "alp-source": {
@@ -44,19 +44,19 @@
     },
     "./delegation": {
       "alp-source": {
-        "types": "./src/delegation.ts",
-        "default": "./src/delegation.ts"
+        "types": "./src/agents/delegation.ts",
+        "default": "./src/agents/delegation.ts"
       },
-      "types": "./dist/delegation.d.ts",
-      "default": "./dist/delegation.js"
+      "types": "./dist/agents/delegation.d.ts",
+      "default": "./dist/agents/delegation.js"
     },
     "./errors": {
       "alp-source": {
-        "types": "./src/errors.ts",
-        "default": "./src/errors.ts"
+        "types": "./src/_shared/errors.ts",
+        "default": "./src/_shared/errors.ts"
       },
-      "types": "./dist/errors.d.ts",
-      "default": "./dist/errors.js"
+      "types": "./dist/_shared/errors.d.ts",
+      "default": "./dist/_shared/errors.js"
     },
     "./formulas": {
       "alp-source": {
@@ -68,19 +68,19 @@
     },
     "./hook-run": {
       "alp-source": {
-        "types": "./src/hook-run.ts",
-        "default": "./src/hook-run.ts"
+        "types": "./src/hooks/hook-run.ts",
+        "default": "./src/hooks/hook-run.ts"
       },
-      "types": "./dist/hook-run.d.ts",
-      "default": "./dist/hook-run.js"
+      "types": "./dist/hooks/hook-run.d.ts",
+      "default": "./dist/hooks/hook-run.js"
     },
     "./hooks": {
       "alp-source": {
-        "types": "./src/hooks.ts",
-        "default": "./src/hooks.ts"
+        "types": "./src/hooks/hooks.ts",
+        "default": "./src/hooks/hooks.ts"
       },
-      "types": "./dist/hooks.d.ts",
-      "default": "./dist/hooks.js"
+      "types": "./dist/hooks/hooks.d.ts",
+      "default": "./dist/hooks/hooks.js"
     },
     "./index": {
       "alp-source": {
@@ -100,11 +100,11 @@
     },
     "./init": {
       "alp-source": {
-        "types": "./src/init.ts",
-        "default": "./src/init.ts"
+        "types": "./src/project/init.ts",
+        "default": "./src/project/init.ts"
       },
-      "types": "./dist/init.d.ts",
-      "default": "./dist/init.js"
+      "types": "./dist/project/init.d.ts",
+      "default": "./dist/project/init.js"
     },
     "./library-edit": {
       "alp-source": {
@@ -124,75 +124,75 @@
     },
     "./log": {
       "alp-source": {
-        "types": "./src/log.ts",
-        "default": "./src/log.ts"
+        "types": "./src/_shared/log.ts",
+        "default": "./src/_shared/log.ts"
       },
-      "types": "./dist/log.d.ts",
-      "default": "./dist/log.js"
+      "types": "./dist/_shared/log.d.ts",
+      "default": "./dist/_shared/log.js"
     },
     "./migrations": {
       "alp-source": {
-        "types": "./src/migrations.ts",
-        "default": "./src/migrations.ts"
+        "types": "./src/state/migrations.ts",
+        "default": "./src/state/migrations.ts"
       },
-      "types": "./dist/migrations.d.ts",
-      "default": "./dist/migrations.js"
+      "types": "./dist/state/migrations.d.ts",
+      "default": "./dist/state/migrations.js"
     },
     "./models": {
       "alp-source": {
-        "types": "./src/models.ts",
-        "default": "./src/models.ts"
+        "types": "./src/agents/models.ts",
+        "default": "./src/agents/models.ts"
       },
-      "types": "./dist/models.d.ts",
-      "default": "./dist/models.js"
+      "types": "./dist/agents/models.d.ts",
+      "default": "./dist/agents/models.js"
     },
     "./permissions": {
       "alp-source": {
-        "types": "./src/permissions.ts",
-        "default": "./src/permissions.ts"
+        "types": "./src/project/permissions.ts",
+        "default": "./src/project/permissions.ts"
       },
-      "types": "./dist/permissions.d.ts",
-      "default": "./dist/permissions.js"
+      "types": "./dist/project/permissions.d.ts",
+      "default": "./dist/project/permissions.js"
     },
     "./profiles": {
       "alp-source": {
-        "types": "./src/profiles.ts",
-        "default": "./src/profiles.ts"
+        "types": "./src/agents/profiles.ts",
+        "default": "./src/agents/profiles.ts"
       },
-      "types": "./dist/profiles.d.ts",
-      "default": "./dist/profiles.js"
+      "types": "./dist/agents/profiles.d.ts",
+      "default": "./dist/agents/profiles.js"
     },
     "./promptsafe": {
       "alp-source": {
-        "types": "./src/promptsafe.ts",
-        "default": "./src/promptsafe.ts"
+        "types": "./src/_shared/promptsafe.ts",
+        "default": "./src/_shared/promptsafe.ts"
       },
-      "types": "./dist/promptsafe.d.ts",
-      "default": "./dist/promptsafe.js"
+      "types": "./dist/_shared/promptsafe.d.ts",
+      "default": "./dist/_shared/promptsafe.js"
     },
     "./providers": {
       "alp-source": {
-        "types": "./src/providers.ts",
-        "default": "./src/providers.ts"
+        "types": "./src/agents/providers.ts",
+        "default": "./src/agents/providers.ts"
       },
-      "types": "./dist/providers.d.ts",
-      "default": "./dist/providers.js"
+      "types": "./dist/agents/providers.d.ts",
+      "default": "./dist/agents/providers.js"
     },
     "./resolver": {
       "alp-source": {
-        "types": "./src/resolver.ts",
-        "default": "./src/resolver.ts"
+        "types": "./src/agents/resolver.ts",
+        "default": "./src/agents/resolver.ts"
       },
-      "types": "./dist/resolver.d.ts",
-      "default": "./dist/resolver.js"
+      "types": "./dist/agents/resolver.d.ts",
+      "default": "./dist/agents/resolver.js"
     },
     "./state-schema": {
       "alp-source": {
-        "types": "./src/state-schema.ts",
-        "default": "./src/state-schema.ts"
+        "types": "./src/state/state-schema.ts",
+        "default": "./src/state/state-schema.ts"
       },
-      "types": "./dist/state-schema.d.ts",
-      "default": "./dist/state-schema.js"
+      "types": "./dist/state/state-schema.d.ts",
+      "default": "./dist/state/state-schema.js"
     },
     "./task-rows": {
       "alp-source": {
@@ -212,65 +212,65 @@
     },
     "./teams": {
       "alp-source": {
-        "types": "./src/teams.ts",
-        "default": "./src/teams.ts"
+        "types": "./src/agents/teams.ts",
+        "default": "./src/agents/teams.ts"
       },
-      "types": "./dist/teams.d.ts",
-      "default": "./dist/teams.js"
+      "types": "./dist/agents/teams.d.ts",
+      "default": "./dist/agents/teams.js"
     },
     "./trust": {
       "alp-source": {
-        "types": "./src/trust.ts",
-        "default": "./src/trust.ts"
+        "types": "./src/hooks/trust.ts",
+        "default": "./src/hooks/trust.ts"
       },
-      "types": "./dist/trust.d.ts",
-      "default": "./dist/trust.js"
+      "types": "./dist/hooks/trust.d.ts",
+      "default": "./dist/hooks/trust.js"
     },
     "./upgrade": {
       "alp-source": {
-        "types": "./src/upgrade.ts",
-        "default": "./src/upgrade.ts"
+        "types": "./src/project/upgrade.ts",
+        "default": "./src/project/upgrade.ts"
       },
-      "types": "./dist/upgrade.d.ts",
-      "default": "./dist/upgrade.js"
+      "types": "./dist/project/upgrade.d.ts",
+      "default": "./dist/project/upgrade.js"
     },
     "./user-settings": {
       "alp-source": {
-        "types": "./src/user-settings.ts",
-        "default": "./src/user-settings.ts"
+        "types": "./src/settings/user-settings.ts",
+        "default": "./src/settings/user-settings.ts"
       },
-      "types": "./dist/user-settings.d.ts",
-      "default": "./dist/user-settings.js"
+      "types": "./dist/settings/user-settings.d.ts",
+      "default": "./dist/settings/user-settings.js"
     },
     "./validation": {
       "alp-source": {
-        "types": "./src/validation.ts",
-        "default": "./src/validation.ts"
+        "types": "./src/settings/validation.ts",
+        "default": "./src/settings/validation.ts"
       },
-      "types": "./dist/validation.d.ts",
-      "default": "./dist/validation.js"
+      "types": "./dist/settings/validation.d.ts",
+      "default": "./dist/settings/validation.js"
     },
     "./verify": {
       "alp-source": {
-        "types": "./src/verify.ts",
-        "default": "./src/verify.ts"
+        "types": "./src/project/verify.ts",
+        "default": "./src/project/verify.ts"
       },
-      "types": "./dist/verify.d.ts",
-      "default": "./dist/verify.js"
+      "types": "./dist/project/verify.d.ts",
+      "default": "./dist/project/verify.js"
     },
     "./workflow": {
       "alp-source": {
-        "types": "./src/workflow.ts",
-        "default": "./src/workflow.ts"
+        "types": "./src/agents/workflow.ts",
+        "default": "./src/agents/workflow.ts"
       },
-      "types": "./dist/workflow.d.ts",
-      "default": "./dist/workflow.js"
+      "types": "./dist/agents/workflow.d.ts",
+      "default": "./dist/agents/workflow.js"
     },
     "./types": {
       "alp-source": {
-        "types": "./src/types.ts"
+        "types": "./src/settings/types.ts"
       },
-      "types": "./dist/types.d.ts"
+      "types": "./dist/settings/types.d.ts"
     },
     "./template-path": {
       "alp-source": {
@@ -281,27 +281,27 @@
     },
     "./bridges": {
       "alp-source": {
-        "types": "./src/bridges.ts",
-        "default": "./src/bridges.ts"
+        "types": "./src/launch/bridges.ts",
+        "default": "./src/launch/bridges.ts"
       },
-      "types": "./dist/bridges.d.ts",
-      "default": "./dist/bridges.js"
+      "types": "./dist/launch/bridges.d.ts",
+      "default": "./dist/launch/bridges.js"
     },
     "./packaged": {
       "alp-source": {
-        "types": "./src/packaged.ts",
-        "default": "./src/packaged.ts"
+        "types": "./src/launch/packaged.ts",
+        "default": "./src/launch/packaged.ts"
       },
-      "types": "./dist/packaged.d.ts",
-      "default": "./dist/packaged.js"
+      "types": "./dist/launch/packaged.d.ts",
+      "default": "./dist/launch/packaged.js"
     },
     "./sandbox": {
       "alp-source": {
-        "types": "./src/sandbox.ts",
-        "default": "./src/sandbox.ts"
+        "types": "./src/project/sandbox.ts",
+        "default": "./src/project/sandbox.ts"
       },
-      "types": "./dist/sandbox.d.ts",
-      "default": "./dist/sandbox.js"
+      "types": "./dist/project/sandbox.d.ts",
+      "default": "./dist/project/sandbox.js"
     },
     "./skill-validate": {
       "alp-source": {

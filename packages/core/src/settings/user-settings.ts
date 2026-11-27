@@ -1,8 +1,8 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { moveFile } from './atomic.ts';
+import { moveFile } from '../_shared/atomic.ts';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { AlpError } from './errors.ts';
+import { AlpError } from '../_shared/errors.ts';
 import { DASHBOARD_SETTINGS, validateUserSettings } from './validation.ts';
 
 /**

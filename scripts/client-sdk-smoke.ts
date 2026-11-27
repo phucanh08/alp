@@ -35,7 +35,7 @@ async function alpdWithBridge() {
   const { WebSocketServer, default: WebSocket } = await import('ws');
   const { createAlpRuntime } = await load('dist/runtime/index.js');
   const { createDaemonServer } = await load('dist/daemon/index.js');
-  const { initProject } = await load('packages/core/dist/init.js');
+  const { initProject } = await load('packages/core/dist/project/init.js');
   const { fakeTransport } = await load('test/support/fake-agent.ts');
   const { connectSocket, daemonPaths } = await load('packages/client/dist/index.js');
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-sdk-smoke-'));

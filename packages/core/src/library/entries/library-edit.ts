@@ -1,13 +1,13 @@
 import { cp, lstat, mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { moveFile } from '../../atomic.ts';
-import { AlpError } from '../../errors.ts';
-import { assertNoSymlinks } from '../../safe-path.ts';
-import { agentSources, builtinText, jsonObject, libraryEntries, optionalText } from '../../resolver.ts';
-import { teamSources, validateTeam } from '../../teams.ts';
-import { normalizeMcp, validateAgentConfig, validateHook } from '../../validation.ts';
-import { validateProvider } from '../../providers.ts';
+import { moveFile } from '../../_shared/atomic.ts';
+import { AlpError } from '../../_shared/errors.ts';
+import { assertNoSymlinks } from '../../_shared/safe-path.ts';
+import { agentSources, builtinText, jsonObject, libraryEntries, optionalText } from '../../agents/resolver.ts';
+import { teamSources, validateTeam } from '../../agents/teams.ts';
+import { normalizeMcp, validateAgentConfig, validateHook } from '../../settings/validation.ts';
+import { validateProvider } from '../../agents/providers.ts';
 import { checkFrontmatter, skillReferences, specName, splitSkill } from '../templates/skill-validate.ts';
 
 type Layer = 'builtin' | 'library' | 'project';

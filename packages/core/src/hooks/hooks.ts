@@ -1,8 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { AlpError } from './errors.ts';
-import { validateHook } from './validation.ts';
-import type { ResolvedAgent } from './types.ts';
+import { AlpError } from '../_shared/errors.ts';
+import { validateHook } from '../settings/validation.ts';
+import type { ResolvedAgent } from '../settings/types.ts';
 
 export type LoadedHook = { name: string, path: string, project: boolean, event: string, command: string, blocking?: boolean, timeoutSec?: number, match?: { agent?: string, label?: string }, description?: string };
 
@@ -10,7 +10,7 @@ export type LoadedHook = { name: string, path: string, project: boolean, event: 
  * The hook definitions an agent uses (ALPD §45): those it names in agent.json and the
  * JSON files in its own hooks/ directory. `project` marks a hook that comes from the
  * project's .alp/, which runs only once the user trusts the workspace.
- * @param {import('./types.js').ResolvedAgent} agent
+ * @param {import('../settings/types.js').ResolvedAgent} agent
  * @returns {Promise<Array<{ name: string, path: string, project: boolean, event: string, command: string, blocking?: boolean, timeoutSec?: number, match?: { agent?: string, label?: string }, description?: string }>>}
  */
 export async function loadHooks(agent: ResolvedAgent): Promise<LoadedHook[]> {

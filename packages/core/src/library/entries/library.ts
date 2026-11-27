@@ -1,10 +1,10 @@
 import { shippedTemplateRoot } from '../../template-path.ts';
 import { chmod, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
-import { moveFile } from '../../atomic.ts';
+import { moveFile } from '../../_shared/atomic.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import { AlpError } from '../../errors.ts';
+import { AlpError } from '../../_shared/errors.ts';
 
 type SeedResult = { created: string[]; updated: string[]; offered?: string[] };
 type SeedOptions = { templateRoot?: URL; templates?: Record<string, string>; offerRoleSkills?: boolean };

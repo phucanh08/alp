@@ -10,7 +10,7 @@ import type { ScheduleJob, ScheduleStatus } from '@anhlp/alp-protocol/index';
  * alpd's scheduled continuations: one JSON file per job under
  * `$ALP_HOME/schedules`, written atomically. The directory is its own, beside the
  * state directory and not inside it: the state has a schema version of its own
- * (packages/core/src/state-schema.js), and a job is not part of that state, so an
+ * (packages/core/src/state/state-schema.ts), and a job is not part of that state, so an
  * ALP that does not know jobs keeps working beside one that does.
  *
  * A job is one-shot: it waits for its time, is delivered once, and then says what

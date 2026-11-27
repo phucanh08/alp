@@ -201,7 +201,7 @@ The Paseo model picker shows the teams, Phở and Cafe first; a session's model 
 
 On Claude, read-only and workspace-write profiles also put Bash in the OS sandbox, so a read-only reviewer can run tests that only read. A read-only profile never leaves that sandbox: its allowed commands, and those you approve, run inside it, without writes or network; for approvals that write, give the profile base `workspace-write` and start the session with `--mode read-only`. With `"workdir": "copy"` an agent works in a disposable copy of your tree, where it may build and test without touching yours. `alp permissions` shows each agent's profile, and `alp permissions check <agent> "<command>"` tests a rule. Details: [Permission profiles](docs/alp/team-workflow.md#permission-profiles).
 
-Use `resolveAgent(projectRoot, { agent: 'your-agent' })` from `src/core/resolver.js` to resolve an agent without starting a runtime. Explicit selection overrides settings; missing settings default to `main`. There is no central agent registry.
+Use `resolveAgent(projectRoot, { agent: 'your-agent' })` from `packages/core/src/agents/resolver.ts` to resolve an agent without starting a runtime. Explicit selection overrides settings; missing settings default to `main`. There is no central agent registry.
 
 ## Daemon and CLI
 

@@ -78,7 +78,7 @@ test('every shipped role definition is listed in teamV1', async () => {
     const hash = createHash('sha256').update(text).digest('hex');
     if (!(shippedRoleHashes as Record<string, string[]>)[name]!.includes(hash)) missing.push(`${name} ${hash}`);
   }
-  assert.deepEqual(missing, [], `append these to teamV1 in packages/core/src/upgrade.ts:\n${missing.join('\n')}`);
+  assert.deepEqual(missing, [], `append these to teamV1 in packages/core/src/project/upgrade.ts:\n${missing.join('\n')}`);
 });
 
 test('malformed settings are rejected before migrating instructions', async t => {

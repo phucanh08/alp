@@ -1,12 +1,12 @@
-import { shippedTemplateRoot } from './template-path.ts';
+import { shippedTemplateRoot } from '../template-path.ts';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { AlpError } from './errors.ts';
-import { validateAgentConfig, validateHook, validateSettings, normalizeMcp, validateResolvedAgent } from './validation.ts';
-import { librarySkills } from './library/entries/library.ts';
+import { AlpError } from '../_shared/errors.ts';
+import { validateAgentConfig, validateHook, validateSettings, normalizeMcp, validateResolvedAgent } from '../settings/validation.ts';
+import { librarySkills } from '../library/entries/library.ts';
 import type { Dirent } from 'node:fs';
-import type { ResolvedAgent } from './types.ts';
-export { AlpError } from './errors.ts';
+import type { ResolvedAgent } from '../settings/types.ts';
+export { AlpError } from '../_shared/errors.ts';
 
 
 type LibraryOptions = { library?: string; templates?: Record<string, string> };
@@ -153,7 +153,7 @@ async function namedEntry(root: string, library: string | undefined, kind: strin
 /**
  * `library` is the user's library (ALP_HOME): its agents and the skills, MCP servers and
  * hooks agents name. The agent's own skills/ directory replaces a skill of the same name.
- * @returns {Promise<import('./types.js').ResolvedAgent>}
+ * @returns {Promise<import('../settings/types.js').ResolvedAgent>}
  */
 export async function resolveAgent(projectRoot: string, { agent, library, templates }: { agent?: string } & LibraryOptions = {}): Promise<ResolvedAgent> {
   const root = path.resolve(projectRoot);

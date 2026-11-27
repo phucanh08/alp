@@ -16,8 +16,8 @@ import { STATE_SCHEMA, readStateSchema } from '@anhlp/alp-core/state-schema';
 import { createTask, loadTasks } from '@anhlp/alp-core/tasks';
 
 const run = promisify(execFile);
-const BACKUP_MODULE = new URL('../dist/backup.js', import.meta.url).href;
-const MIGRATIONS_MODULE = new URL('../dist/migrations.js', import.meta.url).href;
+const BACKUP_MODULE = new URL('../dist/state/backup.js', import.meta.url).href;
+const MIGRATIONS_MODULE = new URL('../dist/state/migrations.js', import.meta.url).href;
 const posix = process.platform !== 'win32';
 
 /** Every file, directory and link under `root` by relative path; `backups/` is left out. */

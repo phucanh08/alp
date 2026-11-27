@@ -14,7 +14,7 @@ import { HIDDEN, isSecretMarker } from './library.js';
 
 /** The marker that keeps a stored value (alpd's, docs/protocol/alp-json-rpc-v1.md §15.3). */
 export const KEEP = Object.freeze({ $secret: 'keep' });
-/** Hook events as core accepts them (packages/core/src/validation.ts HOOK_EVENTS), and those that may block. */
+/** Hook events as core accepts them (packages/core/src/settings/validation.ts HOOK_EVENTS), and those that may block. */
 export const HOOK_EVENTS = Object.freeze(['session.start', 'turn.end', 'assignment.start', 'assignment.end', 'handoff', 'task.close', 'merge']);
 export const BLOCKING_HOOK_EVENTS = Object.freeze(['handoff', 'task.close', 'merge']);
 /** Scopes an owner writes: this host's library (the user's entries) or the open project's .alp. */

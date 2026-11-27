@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { jsonObject } from './resolver.ts';
-import { AlpError } from './errors.ts';
+import { AlpError } from '../_shared/errors.ts';
 
 const name = (value: unknown) => typeof value === 'string' && value.trim() && !['.', '..'].includes(value) && !/[\\/\x00]/.test(value);
 
