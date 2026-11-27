@@ -1,4 +1,3 @@
-import { realpath as fsRealpath } from 'node:fs/promises';
 import { createRegistry, RegistryError } from './workspaces/registry.ts';
 import { createWorkspaceWorktrees } from './workspaces/worktrees.ts';
 import { HistoryError } from './persistence/history.ts';
@@ -21,10 +20,11 @@ import { RpcError } from './rpc/rpc-error.ts';
 import { agentRefused, digest, frameBytes, invalidParams, listCursor, persistenceFailed, principalOf, validId } from './rpc/helpers.ts';
 import type { Connection } from './rpc/connection.ts';
 import { createOperations, fromCore, type OperationsOptions } from './operations/operations.ts';
-import { createFindPages, FileAccessError, FilesError, listWorkspaceDirectory, previewWorkspaceFile, readWorkspaceFile, searchHostDirectories, searchWorkspaceFiles } from './workspaces/files.ts';
+import { createFindPages } from './workspaces/files.ts';
 import { createGitReader } from './workspaces/git.ts';
 import { createScheduleStore, projectKey } from './schedules/schedules.ts';
 import { createScheduleHandlers } from './schedules/rpc/handlers.ts';
+import { createWorkspaceHandlers } from './workspaces/rpc/handlers.ts';
 import { createTerminalHandlers } from './terminals/rpc/handlers.ts';
 import { createAttachmentHandlers } from './attachments/rpc/handlers.ts';
 import { createCatalogHandlers } from './catalog/rpc/handlers.ts';
@@ -1041,6 +1041,13 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
 
   /** Projects, tasks, library and settings (docs/protocol/alp-json-rpc-v1.md §15); a team save syncs the projects sessions ran in. */
   const registry = home ? createRegistry(home) : undefined;
+  const registryCall = async (run: () => Promise<any>) => {
+    if (!registry) throw new RpcError(ERROR.unavailable, 'Registry needs ALP_HOME');
+    try { return await run(); } catch (e) {
+      if (e instanceof RegistryError) throw new RpcError(e.code, e.message, e.data);
+      throw new RpcError(ERROR.failed, e instanceof Error ? e.message : String(e), { reason: 'persistence_failed' });
+    }
+  };
   /** The catalog as the registry holds it now, kept for session rows (capability `session.meta`). */
   const labelList = () => registryCall(async () => { keepCatalog((await registry!.snapshot()).labels.catalog); return labelCatalog!; });
   // Session rows filter their labels by the catalog: read it before the first request is served.
@@ -1067,10 +1074,6 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     log: { warn: (message, fields) => log.warn(message, fields), info: (message, fields) => log.info(message, fields) },
     ...terminalOptions,
   }) : undefined;
-  const gitCall = <T>(run: (reader: NonNullable<typeof gitReader>) => Promise<T>) => {
-    if (!gitReader) throw new RpcError(ERROR.unavailable, 'Registry needs ALP_HOME');
-    return run(gitReader);
-  };
   const operations = createOperations({ home, templates, knownProjects: () => new Set([...records.values()].flatMap(record => record.session?.projectRoot ? [record.session.projectRoot] : [])), onGateChange: root => runtime.syncGates?.(root),
     // A provider file saved: reread the ACP rows; one the user just enabled is probed for its models (t-d0b0).
     learnedModels: id => modelCatalog?.acpModels(id) ?? [],
@@ -1081,6 +1084,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   const catalogHandlers = createCatalogHandlers({ modelCatalog });
   const attachmentHandlers = createAttachmentHandlers({ attachments, log });
   const terminalHandlers = createTerminalHandlers({ terminals });
+  const workspaceHandlers = createWorkspaceHandlers({ registry, worktrees, workspaceDescriptor, registryCall, gitReader, gitFacts, findPages, keepCatalog, labelCatalog: () => labelCatalog, followLabel, log });
   const scheduleHandlers = createScheduleHandlers({ schedules, scheduler, runtime, log });
   const handlers: Record<string, (connection: Connection, params: any) => Promise<unknown> | unknown> = {
     'extension.register': async (connection, params) => {
@@ -1209,51 +1213,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       return { marked: true, attention };
     },
 
-    /**
-     * The files of a directory whose path matches a query, read-only and confined to it: no link
-     * is followed, only names are read (docs/protocol/alp-json-rpc-v1.md §12.3, ALPD §15).
-     */
-    async 'workspace.files.search'(_connection, { projectRoot, query, limit } = {}) {
-      if (typeof projectRoot !== 'string' || !path.isAbsolute(projectRoot) || path.resolve(projectRoot) !== projectRoot) {
-        throw new RpcError(RPC_ERROR.invalidParams, 'projectRoot must be an absolute, normalized path', { reason: 'invalid_path' });
-      }
-      try {
-        return await searchWorkspaceFiles(projectRoot, { query, limit });
-      } catch (error) {
-        if (error instanceof FilesError) throw new RpcError(ERROR.notFound, error.message, { reason: 'not_directory' });
-        throw error;
-      }
-    },
-
-    /**
-     * The entries of a directory under projectRoot, and the content of a text file there:
-     * read-only, confined to it, no link followed, blocked paths always refused, .gitignore'd ones
-     * unless includeIgnored (docs/protocol/alp-json-rpc-v1.md §12.4, ALPD §15).
-     */
-    async 'workspace.files.list'(_connection, { projectRoot, path: relative, includeIgnored, cursor, internalLinks } = {}) {
-      return filesCall(projectRoot, () => listWorkspaceDirectory(projectRoot, { path: relative, includeIgnored: includeIgnored === true, cursor, internalLinks: internalLinks === true }));
-    },
-    async 'workspace.files.read'(_connection, { projectRoot, path: relative, includeIgnored } = {}) {
-      return filesCall(projectRoot, () => readWorkspaceFile(projectRoot, { path: relative, includeIgnored: includeIgnored === true }));
-    },
-
-    /**
-     * Every name under projectRoot in pages of a snapshot kept for this connection, and a file's
-     * preview in chunks (docs/protocol/alp-json-rpc-v1.md §12.11): what the Paseo bridge's Files
-     * panel and suggestions read, confined as workspace.files.read is. The gateway exposes neither.
-     */
-    async 'workspace.files.find'(connection, { projectRoot, query, kinds, matchMode, limit, cursor } = {}) {
-      return filesCall(projectRoot, () => findPages(connection, projectRoot, { query, kinds, matchMode, limit, cursor }));
-    },
-    async 'workspace.files.preview'(_connection, { projectRoot, path: relative, includeIgnored, internalLinks, maxBytes, offset, revision } = {}) {
-      return filesCall(projectRoot, () => previewWorkspaceFile(projectRoot, { path: relative, includeIgnored: includeIgnored === true, internalLinks: internalLinks === true, maxBytes, offset, revision }));
-    },
-
-    /** The host's directories for the folder to add as a project (§12.11): the owner's own names, never remote. */
-    async 'host.directories.search'(_connection, { query, limit } = {}) {
-      return searchHostDirectories(query, { limit });
-    },
-
+    ...workspaceHandlers,
     /** The project board: live claims, decisions and findings (ALPD §18). */
     async 'board.list'(_connection, { projectRoot } = {}) {
       if (typeof projectRoot !== 'string' || !path.isAbsolute(projectRoot)) throw new RpcError(-32602, 'An absolute projectRoot is required');
@@ -1312,35 +1272,6 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       return {};
     },
 
-    'registry.owner': (_c, params) => registryCall(async () => {
-      const result = params.operation ? await registry!.mutate(params.operation, params.args ?? {}, { requestId: params.requestId, ifRevision: params.ifRevision }) : undefined;
-      const { receipts: _receipts, ...metadata } = await registry!.snapshot();
-      keepCatalog(metadata.labels.catalog);
-      // Roots carry catalog labels too (session.update): they follow a rename and lose a deleted one.
-      // Only while the old name is gone from the catalog: a replayed receipt must not take a label
-      // created again under that name from the roots that carry it now.
-      const gone = (name: unknown): name is string => typeof name === 'string' && !labelCatalog?.has(name.toLowerCase());
-      if (params.operation === 'label.update' && gone(result?.previousName) && typeof result.label?.name === 'string') await followLabel(result.previousName, result.label.name);
-      if (params.operation === 'label.delete' && gone(params.args?.name)) await followLabel(params.args.name, undefined);
-      return { ...(result ? { result } : {}), registry: metadata };
-    }),
-    'registry.worktree': (_c, p) => registryCall(async () => worktrees ? worktrees.grants(p) : { mappings: [], workspaces: [] }),
-    'workspace.worktree.options': (_c, p) => registryCall(async () => { const w = (await registry!.snapshot()).workspaces.find(w => w.id === p.workspaceId); if (!w) throw new RegistryError(1001, 'No workspace', { reason: 'not_found' }); const grants = worktrees ? await worktrees.grants(p) : { mappings: [], workspaces: [] }; return { mappingIds: grants.mappings.filter(m => m.source === (w.canonical ?? w.directory)).map(m => m.id) }; }),
-    'workspace.worktree.create': (_c, p) => registryCall(async () => { if (!worktrees) throw new RegistryError(1005, 'Worktrees are unavailable on this platform', { reason: 'worktrees_unsupported' }); const result = await worktrees.mutate('create', p, p); return { ...result, workspace: await workspaceDescriptor(result.workspace) }; }),
-    'workspace.worktree.remove': (_c, p) => registryCall(async () => { if (!worktrees) throw new RegistryError(1005, 'Worktrees are unavailable on this platform', { reason: 'worktrees_unsupported' }); const result = await worktrees.mutate('remove', p, p); return { ...result, workspace: await workspaceDescriptor(result.workspace) }; }),
-    'workspace.git.status': (_c, p) => gitCall(reader => reader.status(p.workspaceId)),
-    'workspace.git.diff': (_c, p) => gitCall(reader => reader.diff({ workspaceId: p.workspaceId, compare: p.compare, path: p.path, cursor: p.cursor })),
-    'workspace.git.facts': (c, p) => agentRefused(c, 'workspace.git.facts') ?? gitFacts.facts(p.directory),
-    'project.list': (_c, p) => registryList('projects', p),
-    'workspace.list': (_c, p) => registryList('workspaces', p),
-    'workspace.get': (_c, p) => registryCall(async () => {
-      await registry!.resolve(p.workspaceId, undefined, true);
-      const r = await registry!.snapshot();
-      return { workspace: { ...await workspaceDescriptor(r.workspaces.find(w => w.id === p.workspaceId)), revision: r.revision }, revision: r.revision };
-    }),
-    'project.register': (_c, p) => registryMutation('project.register', p),
-    'project.remove': (_c, p) => registryMutation('project.remove', p),
-    'workspace.update': (_c, p) => registryMutation('workspace.update', p),
     ...catalogHandlers,
     ...terminalHandlers,
     ...attachmentHandlers,
@@ -1760,36 +1691,6 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     // schedule.create/list/get/cancel (schedules/rpc/handlers.ts); runtime.bindSchedules below reaches them here too.
     ...scheduleHandlers,
   };
-  const registryCall = async (run: () => Promise<any>) => {
-    if (!registry) throw new RpcError(ERROR.unavailable, 'Registry needs ALP_HOME');
-    try { return await run(); } catch (e) {
-      if (e instanceof RegistryError) throw new RpcError(e.code, e.message, e.data);
-      throw new RpcError(ERROR.failed, e instanceof Error ? e.message : String(e), { reason: 'persistence_failed' });
-    }
-  };
-  const registryList = async (kind: 'projects' | 'workspaces', params: any = {}) => registryCall(async () => {
-    const r = await registry!.snapshot();
-    const allowed = params.projectRoots;
-    let entries: any[] = r[kind].filter((e: any) => kind === 'projects' ? params.includeRemoved || !e.removedAt : params.includeArchived || (!e.archivedAt && !r.projects.find(p => p.id === e.projectId)?.removedAt));
-    if (allowed !== undefined) {
-      entries = (await Promise.all(entries.map(async e => {
-        const directory = kind === 'projects' ? e.root : e.directory;
-        const canonical = await fsRealpath(directory).catch(() => undefined);
-        return canonical && (!e.canonical || canonical === e.canonical) && allowed.includes(canonical) ? e : undefined;
-      }))).filter(Boolean);
-    }
-    const offset = params.cursor === undefined ? 0 : Number(params.cursor);
-    if (!Number.isSafeInteger(offset) || offset < 0) throw new RpcError(-32602, 'Invalid registry cursor');
-    const limit = params.limit ?? 100;
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new RpcError(-32602, 'Invalid registry limit');
-    return { [kind]: await Promise.all(entries.slice(offset, offset + limit).map(async e => ({ ...(kind === 'workspaces' ? await workspaceDescriptor(e) : e), revision: r.revision }))), revision: r.revision, total: entries.length, nextCursor: offset + limit < entries.length ? String(offset + limit) : null };
-  });
-  const registryMutation = (method: string, p: any) => registryCall(async () => {
-    if (!Number.isSafeInteger(p.ifRevision) || p.ifRevision < 0) throw new RpcError(-32602, 'ifRevision is required');
-    const { requestId, ifRevision, authorizedRoots, ...args } = p;
-    const result = await registry!.mutate(method, args, { requestId, ifRevision, allowedRoots: authorizedRoots });
-    return result.workspace ? { ...result, workspace: await workspaceDescriptor(result.workspace) } : result;
-  });
   runtime.bindSchedules?.(async (action, params) => handlers[`schedule.${action}`](undefined as any, params));
   for (const [method, handler] of Object.entries(operations.handlers)) handlers[method] = (connection, params) => handler(params, { agent: connection.agent === true });
   Object.setPrototypeOf(handlers, null);
@@ -1828,24 +1729,6 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       checks.push({ id: 'persistence', ok: failing === 0, ...(failing ? { code: 'ALP_PERSISTENCE_FAILING', message: `${failing} write${failing > 1 ? 's' : ''} of sessions or timelines failed and have not been written since` } : {}) });
     }
     return { live: true, ready: checks.every(check => check.ok), checks };
-  }
-
-  /**
-   * One workspace.files.list or read call: projectRoot checked, refusals answered with their code
-   * and reason, any other failure with a fixed message (it may name a host path; alpd logs it).
-   */
-  async function filesCall<T>(projectRoot: unknown, read: () => Promise<T>): Promise<T> {
-    if (typeof projectRoot !== 'string' || !path.isAbsolute(projectRoot) || path.resolve(projectRoot) !== projectRoot) {
-      throw new RpcError(RPC_ERROR.invalidParams, 'projectRoot must be an absolute, normalized path', { reason: 'invalid_path' });
-    }
-    try {
-      return await read();
-    } catch (error) {
-      if (error instanceof FileAccessError) throw new RpcError(error.code, error.message, { reason: error.reason });
-      if (error instanceof FilesError) throw new RpcError(ERROR.notFound, error.message, { reason: 'not_directory' });
-      log.error('workspace file read failed', { code: 'ALPD_FILES_FAILED', error });
-      throw new RpcError(ERROR.failed, 'alpd could not read the workspace file');
-    }
   }
 
   /** What this daemon lists in daemon.hello: only features it serves now (docs/protocol/alp-json-rpc-v1.md §6). */
