@@ -7,7 +7,7 @@ import path from 'node:path';
 import net from 'node:net';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { installedProgram, serviceDefinition, serviceFor } from '../../packages/client/dist/service.js';
+import { installedProgram, serviceDefinition, serviceFor } from '../../packages/client/dist/daemon/service.js';
 import { alpHome, daemonPaths, lockAlive, readLock } from '../../packages/client/dist/index.js';
 
 /** RegExp.escape, which Node 22 lacks. */

@@ -8,13 +8,13 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { initProject } from '@anhlp/alp-core/init';
 import { getEntry, listEntries, saveEntry } from '@anhlp/alp-core/library-edit';
-import { testEntry } from '../../packages/client/dist/library-test.js';
-import { diagnose } from '../../packages/client/dist/doctor.js';
-import { probeAntigravity } from '../../packages/client/dist/antigravity-probe.js';
+import { testEntry } from '../../packages/client/dist/diagnostics/library-test.js';
+import { diagnose } from '../../packages/client/dist/diagnostics/doctor.js';
+import { probeAntigravity } from '../../packages/client/dist/diagnostics/antigravity-probe.js';
 import { validateProvider } from '@anhlp/alp-core/providers';
 import { createAlpRuntime, resolveSession, AntigravityTransport } from '../../dist/runtime/index.js';
 import { teardown } from '../support/teardown.ts';
-import type { AcpProbe } from '../../packages/client/src/acp-probe.ts';
+import type { AcpProbe } from '../../packages/client/src/diagnostics/acp-probe.ts';
 
 // `any`: event envelopes, transport notifications and agy's logged arguments are JSON of every shape; the tests read the fields they assert on.
 type Json = any;

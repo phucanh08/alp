@@ -11,35 +11,35 @@
   "exports": {
     "./acp-probe": {
       "alp-source": {
-        "types": "./src/acp-probe.ts",
-        "default": "./src/acp-probe.ts"
+        "types": "./src/diagnostics/acp-probe.ts",
+        "default": "./src/diagnostics/acp-probe.ts"
       },
-      "types": "./dist/acp-probe.d.ts",
-      "default": "./dist/acp-probe.js"
+      "types": "./dist/diagnostics/acp-probe.d.ts",
+      "default": "./dist/diagnostics/acp-probe.js"
     },
     "./antigravity-probe": {
       "alp-source": {
-        "types": "./src/antigravity-probe.ts",
-        "default": "./src/antigravity-probe.ts"
+        "types": "./src/diagnostics/antigravity-probe.ts",
+        "default": "./src/diagnostics/antigravity-probe.ts"
       },
-      "types": "./dist/antigravity-probe.d.ts",
-      "default": "./dist/antigravity-probe.js"
+      "types": "./dist/diagnostics/antigravity-probe.d.ts",
+      "default": "./dist/diagnostics/antigravity-probe.js"
     },
     "./command": {
       "alp-source": {
-        "types": "./src/command.ts",
-        "default": "./src/command.ts"
+        "types": "./src/_shared/command.ts",
+        "default": "./src/_shared/command.ts"
       },
-      "types": "./dist/command.d.ts",
-      "default": "./dist/command.js"
+      "types": "./dist/_shared/command.d.ts",
+      "default": "./dist/_shared/command.js"
     },
     "./doctor": {
       "alp-source": {
-        "types": "./src/doctor.ts",
-        "default": "./src/doctor.ts"
+        "types": "./src/diagnostics/doctor.ts",
+        "default": "./src/diagnostics/doctor.ts"
       },
-      "types": "./dist/doctor.d.ts",
-      "default": "./dist/doctor.js"
+      "types": "./dist/diagnostics/doctor.d.ts",
+      "default": "./dist/diagnostics/doctor.js"
     },
     "./index": {
       "alp-source": {
@@ -59,11 +59,11 @@
     },
     "./integration-lock": {
       "alp-source": {
-        "types": "./src/integration-lock.ts",
-        "default": "./src/integration-lock.ts"
+        "types": "./src/integration/integration-lock.ts",
+        "default": "./src/integration/integration-lock.ts"
       },
-      "types": "./dist/integration-lock.d.ts",
-      "default": "./dist/integration-lock.js"
+      "types": "./dist/integration/integration-lock.d.ts",
+      "default": "./dist/integration/integration-lock.js"
     },
     "./ipc": {
       "alp-source": {
@@ -75,19 +75,19 @@
     },
     "./library-test": {
       "alp-source": {
-        "types": "./src/library-test.ts",
-        "default": "./src/library-test.ts"
+        "types": "./src/diagnostics/library-test.ts",
+        "default": "./src/diagnostics/library-test.ts"
       },
-      "types": "./dist/library-test.d.ts",
-      "default": "./dist/library-test.js"
+      "types": "./dist/diagnostics/library-test.d.ts",
+      "default": "./dist/diagnostics/library-test.js"
     },
     "./mcp-probe": {
       "alp-source": {
-        "types": "./src/mcp-probe.ts",
-        "default": "./src/mcp-probe.ts"
+        "types": "./src/diagnostics/mcp-probe.ts",
+        "default": "./src/diagnostics/mcp-probe.ts"
       },
-      "types": "./dist/mcp-probe.d.ts",
-      "default": "./dist/mcp-probe.js"
+      "types": "./dist/diagnostics/mcp-probe.d.ts",
+      "default": "./dist/diagnostics/mcp-probe.js"
     },
     "./portable": {
       "alp-source": {
@@ -99,27 +99,27 @@
     },
     "./prompt": {
       "alp-source": {
-        "types": "./src/prompt.ts",
-        "default": "./src/prompt.ts"
+        "types": "./src/terminal-ui/prompt.ts",
+        "default": "./src/terminal-ui/prompt.ts"
       },
-      "types": "./dist/prompt.d.ts",
-      "default": "./dist/prompt.js"
+      "types": "./dist/terminal-ui/prompt.d.ts",
+      "default": "./dist/terminal-ui/prompt.js"
     },
     "./render": {
       "alp-source": {
-        "types": "./src/render.ts",
-        "default": "./src/render.ts"
+        "types": "./src/terminal-ui/render.ts",
+        "default": "./src/terminal-ui/render.ts"
       },
-      "types": "./dist/render.d.ts",
-      "default": "./dist/render.js"
+      "types": "./dist/terminal-ui/render.d.ts",
+      "default": "./dist/terminal-ui/render.js"
     },
     "./service": {
       "alp-source": {
-        "types": "./src/service.ts",
-        "default": "./src/service.ts"
+        "types": "./src/daemon/service.ts",
+        "default": "./src/daemon/service.ts"
       },
-      "types": "./dist/service.d.ts",
-      "default": "./dist/service.js"
+      "types": "./dist/daemon/service.d.ts",
+      "default": "./dist/daemon/service.js"
     },
     "./setup": {
       "alp-source": {
@@ -131,11 +131,11 @@
     },
     "./supervise": {
       "alp-source": {
-        "types": "./src/supervise.ts",
-        "default": "./src/supervise.ts"
+        "types": "./src/daemon/supervise.ts",
+        "default": "./src/daemon/supervise.ts"
       },
-      "types": "./dist/supervise.d.ts",
-      "default": "./dist/supervise.js"
+      "types": "./dist/daemon/supervise.d.ts",
+      "default": "./dist/daemon/supervise.js"
     },
     "./websocket": {
       "alp-source": {

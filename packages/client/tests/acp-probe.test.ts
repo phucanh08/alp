@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { probeAcp } from '../dist/acp-probe.js';
+import { probeAcp } from '../dist/diagnostics/acp-probe.js';
 
 test('ACP probe abort closes the provider before its request timeout', async t => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'alp-probe-abort-'));

@@ -3,7 +3,7 @@ import { mkdir, open, rmdir, unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { moveFile } from '@anhlp/alp-core/atomic';
-import { assertIntegrationName, bootId, bootTime, isSameBoot } from './index.ts';
+import { assertIntegrationName, bootId, bootTime, isSameBoot } from '../index.ts';
 import type { Stats } from 'node:fs';
 
 /** The record in an integration's lock file. */
