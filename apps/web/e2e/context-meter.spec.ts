@@ -24,7 +24,7 @@ test('the meter fills with the session\'s context, shows the details, and keeps 
   const composer = page.getByLabel('Message', { exact: true });
   await composer.fill('How big is it? [usage:54000]');
   await composer.press('Enter');
-  await expect(assistant(page).last()).toContainText('Echo: How big is it?');
+  await expect(assistant(page).filter({ hasText: 'Echo: How big is it?' })).toHaveCount(1);
   await idle(page);
   await expect(meter).toHaveAccessibleName('Context window 21% used');
   await expect(meter).toHaveAttribute('data-level', 'normal');
@@ -42,7 +42,8 @@ test('the meter fills with the session\'s context, shows the details, and keeps 
   await expect(details).toBeHidden();
   await composer.fill('Fill it [usage:240000]');
   await composer.press('Enter');
-  await expect(assistant(page).last()).toContainText('Echo: Fill it');
+  // A specific reply, not the last message: at 93% ALP auto-compacts at idle and its checkpoint/seed turns echo too.
+  await expect(assistant(page).filter({ hasText: 'Echo: Fill it' })).toHaveCount(1);
   await expect(meter).toHaveAccessibleName('Context window 93% used');
   await expect(meter).toHaveAttribute('data-level', 'danger');
 
