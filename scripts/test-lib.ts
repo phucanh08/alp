@@ -107,7 +107,7 @@ export const isCallerBinary = (name: string) => /^ALP_[A-Z0-9_]+_BIN$/i.test(nam
 /**
  * The POSIX base directories a program looks in INSTEAD of `$HOME/.config` and friends when they are
  * set (t-d05e). Redirecting HOME alone leaves them pointing at the user's real directories, and this
- * repository has a consumer that reads one: packages/client/src/service.ts resolves the systemd user
+ * repository has a consumer that reads one: packages/client/src/daemon/service.ts resolves the systemd user
  * unit directory to `XDG_CONFIG_HOME/systemd/user`, so a private-home run that installed a service
  * without ALP_SERVICE_DIR would write a unit into the USER's ~/.config. XDG_RUNTIME_DIR is
  * deliberately NOT here: it is a 0700 directory systemd owns and uses for sockets, and handing a

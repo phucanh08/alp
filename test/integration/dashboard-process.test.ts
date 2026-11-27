@@ -447,7 +447,7 @@ async function preRenamePaseo(t: TestContext, home: string, identity: Json) {
   const script = path.join(home, 'old-paseo.mjs');
   await writeFile(script, `
     import { writeFileSync } from 'node:fs';
-    import { createIntegrationLock } from ${JSON.stringify(pathToFileURL(path.join(clientDist, 'integration-lock.js')).href)};
+    import { createIntegrationLock } from ${JSON.stringify(pathToFileURL(path.join(clientDist, 'integration', 'integration-lock.js')).href)};
     const home = process.env.ALP_HOME;
     const lock = createIntegrationLock(home, 'web');
     const { acquired } = await lock.acquire();

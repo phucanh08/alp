@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { renderLog, renderPs } from '../dist/render.js';
+import { renderLog, renderPs } from '../dist/terminal-ui/render.js';
 import { epicReport } from '@anhlp/alp-core/tasks';
 import { tree, until } from '../../../test/support/fake-agent.ts';
 

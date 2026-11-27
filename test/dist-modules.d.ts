@@ -67,17 +67,17 @@ declare module '*/packages/cli/dist/commands/update/self-update.js' { const m: t
 declare module '*/packages/cli/dist/dashboard/owner/library.js' { const m: typeof import('../packages/cli/src/dashboard/owner/library.ts'); export = m; }
 declare module '*/packages/client/dist/connection/websocket.js' { const m: typeof import('../packages/client/src/connection/websocket.ts'); export = m; }
 declare module '*/packages/client/dist/index.js' { const m: typeof import('../packages/client/src/index.ts'); export = m; }
-declare module '*/packages/client/dist/mcp-probe.js' { const m: typeof import('../packages/client/src/mcp-probe.ts'); export = m; }
+declare module '*/packages/client/dist/diagnostics/mcp-probe.js' { const m: typeof import('../packages/client/src/diagnostics/mcp-probe.ts'); export = m; }
 declare module '*/packages/client/dist/portable.js' { const m: typeof import('../packages/client/src/portable.ts'); export = m; }
-declare module '*/packages/client/dist/render.js' { const m: typeof import('../packages/client/src/render.ts'); export = m; }
-declare module '*/packages/client/dist/service.js' { const m: typeof import('../packages/client/src/service.ts'); export = m; }
+declare module '*/packages/client/dist/terminal-ui/render.js' { const m: typeof import('../packages/client/src/terminal-ui/render.ts'); export = m; }
+declare module '*/packages/client/dist/daemon/service.js' { const m: typeof import('../packages/client/src/daemon/service.ts'); export = m; }
 declare module '*/dist/daemon/index.js' { const m: typeof import('../packages/daemon/src/index.ts'); export = m; }
 declare module '*/integrations/paseo/server/dist/web.js' { const m: typeof import('../integrations/paseo/server/web.ts'); export = m; }
 declare module '*/packages/cli/dist/commands/dashboard/paseo.js' { const m: typeof import('../packages/cli/src/commands/dashboard/paseo.ts'); export = m; }
-declare module '*/packages/client/dist/acp-probe.js' { const m: typeof import('../packages/client/src/acp-probe.ts'); export = m; }
-declare module '*/packages/client/dist/antigravity-probe.js' { const m: typeof import('../packages/client/src/antigravity-probe.ts'); export = m; }
-declare module '*/packages/client/dist/doctor.js' { const m: typeof import('../packages/client/src/doctor.ts'); export = m; }
-declare module '*/packages/client/dist/library-test.js' { const m: typeof import('../packages/client/src/library-test.ts'); export = m; }
+declare module '*/packages/client/dist/diagnostics/acp-probe.js' { const m: typeof import('../packages/client/src/diagnostics/acp-probe.ts'); export = m; }
+declare module '*/packages/client/dist/diagnostics/antigravity-probe.js' { const m: typeof import('../packages/client/src/diagnostics/antigravity-probe.ts'); export = m; }
+declare module '*/packages/client/dist/diagnostics/doctor.js' { const m: typeof import('../packages/client/src/diagnostics/doctor.ts'); export = m; }
+declare module '*/packages/client/dist/diagnostics/library-test.js' { const m: typeof import('../packages/client/src/diagnostics/library-test.ts'); export = m; }
 
 // Written by hand: the feature-architecture skill's checker is a JavaScript template copied into user
 // projects, with no TypeScript source to point at. These are the three exports architecture-contract.test.ts

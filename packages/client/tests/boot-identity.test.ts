@@ -12,7 +12,7 @@ import {
   acquireDaemonLock,
   _setBootIdForTest,
 } from '../dist/index.js';
-import { createIntegrationLock } from '../dist/integration-lock.js';
+import { createIntegrationLock } from '../dist/integration/integration-lock.js';
 
 test.afterEach(() => {
   _setBootIdForTest(null);

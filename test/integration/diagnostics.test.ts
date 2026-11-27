@@ -11,11 +11,11 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { assertPrivateDirectory, bootTime, daemonPaths, ensureDaemon } from '../../packages/client/dist/index.js';
-import { diagnose, diskCheck, shellQuote } from '../../packages/client/dist/doctor.js';
+import { diagnose, diskCheck, shellQuote } from '../../packages/client/dist/diagnostics/doctor.js';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 import { createDaemonServer, createStore } from '../../dist/daemon/index.js';
 import { teardown } from '../support/teardown.ts';
-import type { CommandRunner } from '../../packages/client/src/command.ts';
+import type { CommandRunner } from '../../packages/client/src/_shared/command.ts';
 
 // `any`: alpd's log records and `alp daemon status --json` are JSON whose shape depends on the record; the tests read the fields they assert on.
 type Json = any;

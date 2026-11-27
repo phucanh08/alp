@@ -8,7 +8,7 @@ import { BUILTIN_TEAMS, resolveTeam, teamSources } from '@anhlp/alp-core/teams';
 import { validateSettings } from '@anhlp/alp-core/validation';
 import type { ResolvedTeam } from '@anhlp/alp-core/teams';
 import type { AgentProfilesConfig, RawSettings } from '@anhlp/alp-core/types';
-import { Cancelled, select, text } from './prompt.ts';
+import { Cancelled, select, text } from './terminal-ui/prompt.ts';
 
 const PROVIDERS = ['claude', 'codex'];
 const PROVIDER_LABEL: Record<string, string> = { claude: 'Claude', codex: 'Codex' };

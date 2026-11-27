@@ -4,7 +4,7 @@ import { lstat, mkdtemp, readFile, readlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { claudePermissions, skillPlugin, SKILL_PLUGIN } from '../../dist/runtime/index.js';
-import { renderLog } from '../../packages/client/dist/render.js';
+import { renderLog } from '../../packages/client/dist/terminal-ui/render.js';
 import { tree, until } from '../support/fake-agent.ts';
 import { templateIndexDescription } from '../support/template-text.ts';
 

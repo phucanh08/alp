@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { initProject } from '@anhlp/alp-core/init';
 import { runHook } from '@anhlp/alp-core/hook-run';
-import { probeMcp } from '../../packages/client/dist/mcp-probe.js';
+import { probeMcp } from '../../packages/client/dist/diagnostics/mcp-probe.js';
 import { saveEntry } from '@anhlp/alp-core/library-edit';
 import contribute from '../../integrations/paseo/server/dist/index.js';
 import { teardown } from '../support/teardown.ts';

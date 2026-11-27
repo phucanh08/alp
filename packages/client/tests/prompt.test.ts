@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PassThrough } from 'node:stream';
-import { Cancelled, select } from '../dist/prompt.js';
+import { Cancelled, select } from '../dist/terminal-ui/prompt.js';
 
 const terminal = () => {
   // A PassThrough stands in for the TTY streams select() reads and writes; it has the members select uses.

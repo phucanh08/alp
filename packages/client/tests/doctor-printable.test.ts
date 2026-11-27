@@ -2,7 +2,7 @@
 // different paths never print the same, and the printed text decodes back to the path.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { printable } from '../dist/doctor.js';
+import { printable } from '../dist/diagnostics/doctor.js';
 
 const decode = (text: string) => text.replace(/\\\\|\\u\{([0-9a-f]+)\}/g, (match: string, hex: string | undefined) => hex === undefined ? '\\' : String.fromCodePoint(parseInt(hex, 16)));
 

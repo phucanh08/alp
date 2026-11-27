@@ -380,7 +380,7 @@ const cleared = clearCallerSession();`, 'old-validate.mjs');
 // and HOMEPATH leaves two other ways to the user's real directories. HOMESHARE is the network home a
 // Windows domain profile defines. The XDG base directories are read INSTEAD of $HOME/.config and
 // friends when they are set, and this repository has a consumer that reads one:
-// packages/client/src/service.ts resolves the systemd user unit directory to
+// packages/client/src/daemon/service.ts resolves the systemd user unit directory to
 // `XDG_CONFIG_HOME/systemd/user`, so a private-home run that installed a service without
 // ALP_SERVICE_DIR would have written a unit into the user's own ~/.config. (Every service test today
 // sets ALP_SERVICE_DIR, so nothing depended on the real XDG directories; this closes the way in

@@ -1,6 +1,6 @@
 import { mkdir, unlink, writeFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { daemonStartTimeoutMs, ensureDaemon, lockAlive, readLock, withDaemonLifecycle } from './index.ts';
+import { daemonStartTimeoutMs, ensureDaemon, lockAlive, readLock, withDaemonLifecycle } from '../index.ts';
 import { installedProgram, serviceFor, startService } from './service.ts';
 
 /**
