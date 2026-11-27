@@ -2,7 +2,7 @@ import { realpath as fsRealpath } from 'node:fs/promises';
 import { createRegistry, RegistryError } from './workspaces/registry.ts';
 import { createWorkspaceWorktrees } from './workspaces/worktrees.ts';
 import { HistoryError } from './persistence/history.ts';
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { appendFile, chmod, mkdir, readFile, unlink, lstat, rename } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
@@ -18,12 +18,14 @@ import type { Receipt, SessionRecord, SessionStatus, Store, UnreadableReceipt } 
 import type { PromptContent, SessionSummary } from '@anhlp/alp-protocol/session';
 import type { ScheduleJob, TurnAttention } from '@anhlp/alp-protocol/index';
 import { RpcError } from './rpc/rpc-error.ts';
+import { agentRefused, digest, frameBytes, invalidParams, listCursor, persistenceFailed, principalOf, validId } from './rpc/helpers.ts';
+import type { Connection } from './rpc/connection.ts';
 import { createOperations, fromCore, type OperationsOptions } from './operations/operations.ts';
 import { createFindPages, FileAccessError, FilesError, listWorkspaceDirectory, previewWorkspaceFile, readWorkspaceFile, searchHostDirectories, searchWorkspaceFiles } from './workspaces/files.ts';
 import { createGitReader } from './workspaces/git.ts';
 import { createScheduleStore, projectKey } from './schedules/schedules.ts';
 import { createScheduleHandlers } from './schedules/rpc/handlers.ts';
-import { createAttachmentStore, type AttachmentRuntime, type AttachmentStoreOptions, type Principal } from './attachments/attachments.ts';
+import { createAttachmentStore, type AttachmentRuntime, type AttachmentStoreOptions } from './attachments/attachments.ts';
 import type { RuntimeAttachment } from '@anhlp/alp-protocol/session';
 import { clientMessageId as scheduleMessageId, createScheduler, SCHEDULE_TICK_MS, type ScheduleDelivery } from './schedules/scheduler.ts';
 import { createLifecycleJournal, LIFECYCLE_RETENTION_MS } from './persistence/lifecycle.ts';
@@ -44,20 +46,6 @@ const log = createLogger({ component: 'alpd.ipc' });
 const recoveryLog = createLogger({ component: 'alpd.recovery' });
 
 
-/** A request id v1 accepts: a string of at most 128 characters or a safe integer (docs/protocol/alp-json-rpc-v1.md §3). */
-function validId(id: unknown): id is string | number {
-  if (typeof id !== 'string') return Number.isSafeInteger(id);
-  let length = 0;
-  for (const _point of id) if (++length > 128) return false;
-  return true;
-}
-
-/** The bytes a frame takes on a newline-delimited stream, its newline included. */
-const frameBytes = (message: unknown) => Buffer.byteLength(encodeFrame(message), 'utf8');
-
-const invalidParams = (issues: Array<{ path: string; message: string }>) =>
-  new RpcError(RPC_ERROR.invalidParams, `Invalid params: ${issues.map(issue => `${issue.path || 'params'} ${issue.message}`).join('; ')}`, { reason: 'invalid_params', issues });
-
 /**
  * Crash points for the crash-recovery tests (ALPD §66): with ALP_TEST_CRASH_AT naming one,
  * alpd kills itself there as a crash would. Unset, they do nothing.
@@ -70,54 +58,10 @@ function crashPoint(name: string) {
 
 /** The most labels one root carries (capability `session.meta`). */
 const SESSION_LABELS_MAX = 20;
-const persistenceFailed = (what: string, error: unknown) =>
-  new RpcError(ERROR.failed, `alpd could not record ${what}: ${error instanceof Error ? error.message : String(error)}`, { reason: 'persistence_failed' });
-
-/**
- * Who an attachment call acts for: the principal context a trusted gateway puts on its own
- * connection (its credential id and grant epoch, and the canonical workspaces it may use now), or
- * the local owner, as workspace.worktree does (§12.6, §16).
- */
-function principalOf(params: { principalId?: unknown; principalEpoch?: unknown; authorizedRoots?: unknown }): Principal {
-  return {
-    id: typeof params.principalId === 'string' ? params.principalId : 'owner',
-    epoch: typeof params.principalEpoch === 'string' ? params.principalEpoch : 'owner',
-    ...(Array.isArray(params.authorizedRoots) ? { roots: params.authorizedRoots.filter((root): root is string => typeof root === 'string') } : {}),
-  };
-}
-
-/** A stable hash of JSON data, independent of key order (as Paseo's receipts). */
-function digest(value: unknown) {
-  return createHash('sha256').update(JSON.stringify(value, (_key, candidate) =>
-    candidate !== null && typeof candidate === 'object' && !Array.isArray(candidate)
-      ? Object.fromEntries(Object.entries(candidate).sort(([a], [b]) => a.localeCompare(b)))
-      : candidate)).digest('hex');
-}
-
-type Connection = {
-  socket?: net.Socket;
-  helloed: boolean;
-  /** It said in daemon.hello that an ALP agent started it (t-ca1f): refused what only the user may do. */
-  agent?: boolean;
-  /** The agent's name an agent connection gave in daemon.hello (`principal.agent`, t-1c59): who it is, for the logs; never grants anything. Sticky: the first name stays. */
-  agentName?: string;
-  /** The client name daemon.hello gave: a gate card answered from alp-paseo* is recorded as paseo, else web. */
-  client?: string;
-  roots: Set<string>;
-  send(message: unknown): void;
-  nextId: number;
-  pending: Map<number, { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout; caller: Connection }>;
-};
-
 /** Retained events per live tree, for attach and replay. */
 const TREE_LOG_LIMIT = 20_000;
 /** The daemon.hello capability a process an ALP agent started announces (t-ca1f; the client's handshake sends it). */
 const AGENT_CAPABILITY = 'principal.agent';
-/** A shell alpd opens carries no ALP_AGENT_SESSION, so an agent's connection may not open, attach to or type into one (t-ca1f). */
-const agentRefused = (connection: { agent?: boolean }, method: string): undefined => {
-  if (connection.agent) throw new RpcError(ERROR.forbidden, `${method} is the user's; this connection was opened by an ALP agent`, { reason: 'user_only' });
-  return undefined;
-};
 const SESSION_ID = /^[\w.:-]{1,128}$/;
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const RECEIPT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -146,28 +90,6 @@ function fromUser(item: { origin?: string; clientMessageId?: string }) {
   if (item.clientMessageId?.startsWith('alp-')) return false;
   return item.origin !== undefined ? item.origin === 'user' : item.clientMessageId !== undefined;
 }
-
-/**
- * session.list's order and its keyset cursor: roots before children, the latest `updatedAt`
- * first, then by id, so a page continues after the last session it holds, as Paseo's history pages
- * (server/pagination/sortable-pager.ts at b63a325). The cursor is opaque to clients.
- */
-type ListKey = [child: 0 | 1, updatedAt: string, id: string];
-const listCursor = {
-  key: (session: SessionSummary): ListKey => [session.parentId ? 1 : 0, session.updatedAt ?? '', session.id],
-  compare([childA, updatedA, idA]: ListKey, [childB, updatedB, idB]: ListKey) {
-    return childA - childB || (updatedA === updatedB ? 0 : updatedA < updatedB ? 1 : -1) || (idA === idB ? 0 : idA < idB ? -1 : 1);
-  },
-  encode: (key: ListKey) => Buffer.from(JSON.stringify(key), 'utf8').toString('base64url'),
-  decode(cursor: string): ListKey {
-    let key: unknown;
-    try { key = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')); } catch {}
-    if (!Array.isArray(key) || key.length !== 3 || (key[0] !== 0 && key[0] !== 1) || typeof key[1] !== 'string' || typeof key[2] !== 'string') {
-      throw new RpcError(RPC_ERROR.invalidParams, 'cursor is not one session.list answered', { reason: 'invalid_params' });
-    }
-    return key as ListKey;
-  },
-};
 
 /** What clients need from a daemon connection; AlpClient implements it over the socket. */
 import type { DaemonConnection } from '@anhlp/alp-protocol/connection';
