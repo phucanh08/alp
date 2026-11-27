@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
 import type { RuntimeAttachment } from '@anhlp/alp-protocol/session';
-import type { RuntimeKind } from './resolve.ts';
+import type { RuntimeKind } from './providers/resolve.ts';
 
 /**
  * Non-image attachments on the runtime side (issue #121 branch J, docs/protocol/alp-json-rpc-v1.md

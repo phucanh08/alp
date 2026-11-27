@@ -7,18 +7,18 @@ import { jsonObject, resolveAgent } from '@anhlp/alp-core/resolver';
 import { resolveTeam, teamOf } from '@anhlp/alp-core/teams';
 import { loadHooks } from '@anhlp/alp-core/hooks';
 import { acpModel, loadProvider } from '@anhlp/alp-core/providers';
-import type { AcpProvider } from './providers/transports/acp-transport.ts';
-import type { AntigravityProvider } from './providers/transports/antigravity-transport.ts';
+import type { AcpProvider } from './transports/acp-transport.ts';
+import type { AntigravityProvider } from './transports/antigravity-transport.ts';
 import { ensureLibrary } from '@anhlp/alp-core/library';
 import { compileAgent } from '@anhlp/alp-core/adapter';
 import { capMode, profileFor, READ_ONLY_ROLES } from '@anhlp/alp-core/permissions';
-import { compactSettings } from './sessions/conversation/compact.ts';
+import { compactSettings } from '../sessions/conversation/compact.ts';
 import { userLanguage } from '@anhlp/alp-core/user-settings';
-import { claudeSandboxAvailable } from './providers/transports/claude-transport.ts';
-import { readsSkillsByTool } from './skill-files.ts';
+import { claudeSandboxAvailable } from './transports/claude-transport.ts';
+import { readsSkillsByTool } from '../tools/skill-files.ts';
 import type { ResolvedAgent } from '@anhlp/alp-core/types';
 import type { AlpRuntimeAdapter } from '@anhlp/alp-core/adapter';
-import { DEFAULT_ANTIGRAVITY_MODEL, DEFAULT_CLAUDE_MODEL, DEFAULT_MODEL, ORACLE_MODELS, ORACLE_THINKING, models, modes, thinkingOptions, thinkingOptionsFor } from './catalog.ts';
+import { DEFAULT_ANTIGRAVITY_MODEL, DEFAULT_CLAUDE_MODEL, DEFAULT_MODEL, ORACLE_MODELS, ORACLE_THINKING, models, modes, thinkingOptions, thinkingOptionsFor } from '../sessions/configuration/catalog.ts';
 
 /** Codex and Claude Code, or an ACP agent the user's library defines (ALPD §46). */
 import type { RuntimeKind } from '@anhlp/alp-protocol/dto';

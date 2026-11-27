@@ -9,7 +9,7 @@ import type { ProviderSessionConfig, ProviderPersistence } from './compat.ts';
 
 export const DEFAULT_TEAM = 'pho';
 
-/** The permission modes ALP sessions run in (packages/runtime/src/catalog.ts), as Paseo lists them. */
+/** The permission modes ALP sessions run in (packages/runtime/src/sessions/configuration/catalog.ts), as Paseo lists them. */
 export const MODES = [{ id: 'read-only', label: 'Read only' }, { id: 'workspace-write', label: 'Workspace write' }, { id: 'full-access', label: 'Full access' }];
 
 /** A Paseo model selection that names a team: an id without a runtime prefix. */

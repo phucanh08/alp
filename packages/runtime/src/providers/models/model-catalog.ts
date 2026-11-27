@@ -7,7 +7,7 @@ import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { MODELS, MODEL_POLICY, catalogCacheFile, mergeCatalog as mergeCatalogRows } from '@anhlp/alp-core/models';
 import { writeAtomic } from '@anhlp/alp-core/atomic';
-import { applyCatalog, type CatalogEntry } from '../../catalog.ts';
+import { applyCatalog, type CatalogEntry } from '../../sessions/configuration/catalog.ts';
 
 export type CatalogRuntime = 'codex' | 'claude' | 'antigravity';
 /** A model as a provider reports it. */

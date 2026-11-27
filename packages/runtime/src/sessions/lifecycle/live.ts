@@ -3,9 +3,9 @@ import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { createLogger } from '@anhlp/alp-core/log';
-import type { RuntimeKind, SessionSpec } from '../../resolve.ts';
-import type { Worktree } from '../../workspace.ts';
-import { tell } from '../../write-error.ts';
+import type { RuntimeKind, SessionSpec } from '../../providers/resolve.ts';
+import type { Worktree } from '../../assignments/isolation/workspace.ts';
+import { tell } from '../../_shared/write-error.ts';
 
 /**
  * Assignments that are running, kept on disk so the next alpd can continue them

@@ -43,11 +43,11 @@
     },
     "./catalog": {
       "alp-source": {
-        "types": "./src/catalog.ts",
-        "default": "./src/catalog.ts"
+        "types": "./src/sessions/configuration/catalog.ts",
+        "default": "./src/sessions/configuration/catalog.ts"
       },
-      "types": "./dist/catalog.d.ts",
-      "default": "./dist/catalog.js"
+      "types": "./dist/sessions/configuration/catalog.d.ts",
+      "default": "./dist/sessions/configuration/catalog.js"
     },
     "./claude-transport": {
       "alp-source": {
@@ -75,11 +75,11 @@
     },
     "./github": {
       "alp-source": {
-        "types": "./src/github.ts",
-        "default": "./src/github.ts"
+        "types": "./src/tools/github.ts",
+        "default": "./src/tools/github.ts"
       },
-      "types": "./dist/github.d.ts",
-      "default": "./dist/github.js"
+      "types": "./dist/tools/github.d.ts",
+      "default": "./dist/tools/github.js"
     },
     "./handoff": {
       "alp-source": {
@@ -107,11 +107,11 @@
     },
     "./language": {
       "alp-source": {
-        "types": "./src/language.ts",
-        "default": "./src/language.ts"
+        "types": "./src/_shared/language.ts",
+        "default": "./src/_shared/language.ts"
       },
-      "types": "./dist/language.d.ts",
-      "default": "./dist/language.js"
+      "types": "./dist/_shared/language.d.ts",
+      "default": "./dist/_shared/language.js"
     },
     "./live": {
       "alp-source": {
@@ -123,35 +123,35 @@
     },
     "./mailbox": {
       "alp-source": {
-        "types": "./src/mailbox.ts",
-        "default": "./src/mailbox.ts"
+        "types": "./src/assignments/mailbox.ts",
+        "default": "./src/assignments/mailbox.ts"
       },
-      "types": "./dist/mailbox.d.ts",
-      "default": "./dist/mailbox.js"
+      "types": "./dist/assignments/mailbox.d.ts",
+      "default": "./dist/assignments/mailbox.js"
     },
     "./mcp-tools": {
       "alp-source": {
-        "types": "./src/mcp-tools.ts",
-        "default": "./src/mcp-tools.ts"
+        "types": "./src/tools/mcp-tools.ts",
+        "default": "./src/tools/mcp-tools.ts"
       },
-      "types": "./dist/mcp-tools.d.ts",
-      "default": "./dist/mcp-tools.js"
+      "types": "./dist/tools/mcp-tools.d.ts",
+      "default": "./dist/tools/mcp-tools.js"
     },
     "./process-info": {
       "alp-source": {
-        "types": "./src/process-info.ts",
-        "default": "./src/process-info.ts"
+        "types": "./src/_shared/process-info.ts",
+        "default": "./src/_shared/process-info.ts"
       },
-      "types": "./dist/process-info.d.ts",
-      "default": "./dist/process-info.js"
+      "types": "./dist/_shared/process-info.d.ts",
+      "default": "./dist/_shared/process-info.js"
     },
     "./provider-command": {
       "alp-source": {
-        "types": "./src/provider-command.ts",
-        "default": "./src/provider-command.ts"
+        "types": "./src/providers/provider-command.ts",
+        "default": "./src/providers/provider-command.ts"
       },
-      "types": "./dist/provider-command.d.ts",
-      "default": "./dist/provider-command.js"
+      "types": "./dist/providers/provider-command.d.ts",
+      "default": "./dist/providers/provider-command.js"
     },
     "./providers": {
       "alp-source": {
@@ -171,19 +171,19 @@
     },
     "./resolve": {
       "alp-source": {
-        "types": "./src/resolve.ts",
-        "default": "./src/resolve.ts"
+        "types": "./src/providers/resolve.ts",
+        "default": "./src/providers/resolve.ts"
       },
-      "types": "./dist/resolve.d.ts",
-      "default": "./dist/resolve.js"
+      "types": "./dist/providers/resolve.d.ts",
+      "default": "./dist/providers/resolve.js"
     },
     "./runtime-context": {
       "alp-source": {
-        "types": "./src/runtime-context.ts",
-        "default": "./src/runtime-context.ts"
+        "types": "./src/providers/runtime-context.ts",
+        "default": "./src/providers/runtime-context.ts"
       },
-      "types": "./dist/runtime-context.d.ts",
-      "default": "./dist/runtime-context.js"
+      "types": "./dist/providers/runtime-context.d.ts",
+      "default": "./dist/providers/runtime-context.js"
     },
     "./runtime": {
       "alp-source": {
@@ -203,11 +203,11 @@
     },
     "./tools": {
       "alp-source": {
-        "types": "./src/tools.ts",
-        "default": "./src/tools.ts"
+        "types": "./src/tools/tools.ts",
+        "default": "./src/tools/tools.ts"
       },
-      "types": "./dist/tools.d.ts",
-      "default": "./dist/tools.js"
+      "types": "./dist/tools/tools.d.ts",
+      "default": "./dist/tools/tools.js"
     },
     "./transport": {
       "alp-source": {
@@ -219,19 +219,19 @@
     },
     "./usage": {
       "alp-source": {
-        "types": "./src/usage.ts",
-        "default": "./src/usage.ts"
+        "types": "./src/providers/usage.ts",
+        "default": "./src/providers/usage.ts"
       },
-      "types": "./dist/usage.d.ts",
-      "default": "./dist/usage.js"
+      "types": "./dist/providers/usage.d.ts",
+      "default": "./dist/providers/usage.js"
     },
     "./workspace": {
       "alp-source": {
-        "types": "./src/workspace.ts",
-        "default": "./src/workspace.ts"
+        "types": "./src/assignments/isolation/workspace.ts",
+        "default": "./src/assignments/isolation/workspace.ts"
       },
-      "types": "./dist/workspace.d.ts",
-      "default": "./dist/workspace.js"
+      "types": "./dist/assignments/isolation/workspace.d.ts",
+      "default": "./dist/assignments/isolation/workspace.js"
     }
   },
   "engines": {

@@ -3,12 +3,12 @@ import path from 'node:path';
 import { describeVerification, runVerify, verifyConfig, type Verification, type VerifyConfig } from '@anhlp/alp-core/verify';
 import { recordVerification, loadTasks } from '@anhlp/alp-core/tasks';
 import { checkoutFingerprint, checkoutKey, commitWorktree, linkModules, mergeWorktree, removeWorktree, type Worktree, type WorktreeChange } from './workspace.ts';
-import { writes } from './catalog.ts';
-import { nativeEnvironment } from './providers/providers.ts';
-import { mainOf } from './tools.ts';
-import { errorData, plainObject, toolResult } from './tool-results.ts';
-import type { RuntimeOptions } from './contracts.ts';
-import type { Session, Assignment } from './sessions/lifecycle/session-state.ts';
+import { writes } from '../../sessions/configuration/catalog.ts';
+import { nativeEnvironment } from '../../providers/providers.ts';
+import { mainOf } from '../../tools/tools.ts';
+import { errorData, plainObject, toolResult } from '../../tools/tool-results.ts';
+import type { RuntimeOptions } from '../../contracts.ts';
+import type { Session, Assignment } from '../../sessions/lifecycle/session-state.ts';
 
 type WorktreeContext = {
   options: RuntimeOptions;

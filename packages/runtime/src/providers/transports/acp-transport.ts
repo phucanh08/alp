@@ -1,4 +1,4 @@
-import { writablePath } from '../../permission-path.ts';
+import { writablePath } from '../../tools/permission-path.ts';
 import { spawn, execFile, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
@@ -9,7 +9,7 @@ import { createInterface } from 'node:readline';
 import { commandDecision, unwrapShell, type PermissionProfile } from '@anhlp/alp-core/permissions';
 import { launchCommand } from '@anhlp/alp-core/providers';
 import { bridgeCommand } from '@anhlp/alp-core/bridges';
-import { acpText, acpToolDetail, type AcpCall } from '../../tool-detail.ts';
+import { acpText, acpToolDetail, type AcpCall } from '../../tools/tool-detail.ts';
 import { caseInsensitive, credentialPaths, namesCredential } from './claude-transport.ts';
 import { feedAcpSession } from '../models/model-catalog.ts';
 
