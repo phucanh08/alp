@@ -25,6 +25,7 @@ import { createFindPages, FileAccessError, FilesError, listWorkspaceDirectory, p
 import { createGitReader } from './workspaces/git.ts';
 import { createScheduleStore, projectKey } from './schedules/schedules.ts';
 import { createScheduleHandlers } from './schedules/rpc/handlers.ts';
+import { createAttachmentHandlers } from './attachments/rpc/handlers.ts';
 import { createCatalogHandlers } from './catalog/rpc/handlers.ts';
 import { createAttachmentStore, type AttachmentRuntime, type AttachmentStoreOptions } from './attachments/attachments.ts';
 import type { RuntimeAttachment } from '@anhlp/alp-protocol/session';
@@ -1069,16 +1070,6 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     if (!terminals) throw new RpcError(ERROR.unavailable, 'This alpd has no home: it serves no terminals', { reason: 'terminal_unsupported' });
     return run(terminals);
   };
-  const attachmentCall = async <T>(run: (store: NonNullable<typeof attachments>) => Promise<T>) => {
-    if (!attachments) throw new RpcError(RPC_ERROR.methodNotFound, 'This alpd does not store attachments (capability attachments is not listed)');
-    try {
-      return await run(attachments);
-    } catch (error) {
-      if (error instanceof RpcError) throw error;
-      log.warn('attachment call failed', { code: 'ALPD_ATTACHMENT_FAILED', error });
-      throw new RpcError(ERROR.failed, 'alpd could not store the attachment; the upload was aborted', { reason: 'persistence_failed' });
-    }
-  };
   const gitCall = <T>(run: (reader: NonNullable<typeof gitReader>) => Promise<T>) => {
     if (!gitReader) throw new RpcError(ERROR.unavailable, 'Registry needs ALP_HOME');
     return run(gitReader);
@@ -1091,6 +1082,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   /** workspace.files.find's snapshots, each for the connection that asked. */
   const findPages = createFindPages();
   const catalogHandlers = createCatalogHandlers({ modelCatalog });
+  const attachmentHandlers = createAttachmentHandlers({ attachments, log });
   const scheduleHandlers = createScheduleHandlers({ schedules, scheduler, runtime, log });
   const handlers: Record<string, (connection: Connection, params: any) => Promise<unknown> | unknown> = {
     'extension.register': async (connection, params) => {
@@ -1366,13 +1358,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     'terminal.resize': (c, p) => terminalCall(service => service.resize(principalOf(p), c, p)),
     'terminal.close': (_c, p) => terminalCall(service => service.close(principalOf(p), p)),
     'terminal.revoke': (_c, p) => terminalCall(service => service.revoke(p.principalId)),
-    'attachment.begin': (_c, p) => attachmentCall(store => store.begin(principalOf(p), p)),
-    'attachment.chunk': (_c, p) => attachmentCall(store => store.chunk(principalOf(p), p)),
-    'attachment.commit': (_c, p) => attachmentCall(store => store.commit(principalOf(p), p)),
-    'attachment.abort': (_c, p) => attachmentCall(store => store.abort(principalOf(p), p)),
-    'attachment.get': (_c, p) => attachmentCall(store => store.get(principalOf(p), p)),
-    'attachment.delete': (_c, p) => attachmentCall(store => store.remove(principalOf(p), p)),
-
+    ...attachmentHandlers,
     async 'session.create'(connection, { sessionId, workspaceId, spec, history = 'skip', delegation = true, resume: resuming = false }) {
       if (workspaceId !== undefined) {
         if (!registry || typeof workspaceId !== 'string') throw new RpcError(-32602, 'Invalid workspaceId');
