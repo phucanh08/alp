@@ -140,3 +140,37 @@ test('an agent connection is refused the user-only methods before their other ch
   assert.deepEqual(await refusal(agent.request('question.answer', { questionId: 'q', text: 'yes' })), { code: 1003, message: 'Only the user answers a question; this connection was opened by an ALP agent', reason: 'user_only' });
   assert.deepEqual(await refusal(owner.request('question.answer', { questionId: 'q', text: 'yes' })), { code: 1001, message: 'No question q waits for an answer', reason: undefined });
 });
+
+// The other user-only paths of an agent's connection: session.compact and workspace.git.facts refuse
+// it before any other check, and session.create opens the root without the spec.restore it sent
+// (a named native thread is the owner's alone), where the owner meets the next check or is served.
+test('an agent connection is refused session.compact and workspace.git.facts, and its spec.restore is dropped', { skip: process.platform === 'win32' ? 'unix socket path' : false }, async t => {
+  const defer = teardown(t);
+  const base = await realpath(await mkdtemp(path.join(tmpdir(), 'alp-rpc-agent2-')));
+  defer(() => rm(base, { recursive: true, force: true }));
+  const library = path.join(base, 'library');
+  await seedLibrary(library);
+  const project = path.join(base, 'project');
+  await initProject(project, { library });
+  const runtime = createAlpRuntime({ libraryDir: library, supervisor: false, transport: fakeTransport([]) });
+  const opened: Array<{ id: string; restore: unknown }> = [];
+  const open = runtime.open.bind(runtime);
+  runtime.open = (id, spec, options) => { opened.push({ id, restore: spec.restore }); return open(id, spec, options); };
+  const server = createDaemonServer({ runtime, socketPath: daemonPaths(base).socket, version: 'test' });
+  await server.listen();
+  defer(async () => { await server.close(); await runtime.shutdown(); });
+  const owner = await connectAs(daemonPaths(base).socket, false);
+  defer(() => owner.close());
+  await owner.request('daemon.hello', { protocolVersion: 1 });
+  const agent = await connectAs(daemonPaths(base).socket, true);
+  defer(() => agent.close());
+  await agent.request('daemon.hello', { protocolVersion: 1 });
+  const userOnly = (method: string) => ({ code: 1003, message: `${method} is the user's; this connection was opened by an ALP agent`, reason: 'user_only' });
+  assert.deepEqual(await refusal(agent.request('session.compact', { sessionId: 'none' })), userOnly('session.compact'));
+  assert.deepEqual(await refusal(owner.request('session.compact', { sessionId: 'none' })), { code: 1005, message: 'The session is not open', reason: 'session_busy' });
+  assert.deepEqual(await refusal(agent.request('workspace.git.facts', { directory: project })), userOnly('workspace.git.facts'));
+  assert.deepEqual(await owner.request('workspace.git.facts', { directory: project }), { kind: 'unknown' });
+  const made = await agent.request('session.create', { sessionId: 'ses_agent', spec: { cwd: project, workflow: 'pho', restore: { agent: 'main', threadId: 'thread-of-the-owner' } } });
+  assert.equal(made.session.id, 'ses_agent');
+  assert.deepEqual(opened, [{ id: 'ses_agent', restore: undefined }]);
+});
