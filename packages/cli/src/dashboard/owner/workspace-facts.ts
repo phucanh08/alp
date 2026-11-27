@@ -40,7 +40,7 @@ import type { DashboardOwnerHandler } from './index.ts';
  * Git ignores global configuration, so a `safe.directory` entry there does not apply: a repository
  * owned by another user shows no Git facts (fail soft).
  *
- * Git runs as alpd's Git reads do (packages/daemon/src/git.ts), only less strictly: no system or
+ * Git runs as alpd's Git reads do (packages/daemon/src/workspaces/git.ts), only less strictly: no system or
  * global configuration, no optional locks, no prompts, nothing the repository configures runs (no
  * fsmonitor, hooks, pager, external diff, textconv, filter drivers), no network protocol. gh gets
  * the same fsmonitor and hooks overrides for the Git it starts. Both executables are found on PATH

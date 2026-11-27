@@ -71,7 +71,7 @@ function registryContext(params: Record<string, any>): { ifRevision: number; req
 
 /** Environment variable names a provider may set. */
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
-/** Label colours alpd's registry accepts (packages/daemon/src/registry.ts labelColors). */
+/** Label colours alpd's registry accepts (packages/daemon/src/workspaces/registry.ts labelColors). */
 export const LABEL_COLORS = Object.freeze(['violet', 'sky', 'emerald', 'orange', 'pink', 'indigo', 'teal', 'red', 'amber', 'blue']);
 
 /**

@@ -617,7 +617,7 @@ test('workspace.files.list and read: files.read only, never a default; canonical
   await assert.rejects(client.request('workspace.files.read', { projectRoot: a, path: 'x.txt' }), (failure: Json) => !failure.message.includes(canonicalA));
 });
 
-// A 1x1 PNG, and alpd's preview answer for it (packages/daemon/src/files.ts previewWorkspaceFile).
+// A 1x1 PNG, and alpd's preview answer for it (packages/daemon/src/workspaces/files.ts previewWorkspaceFile).
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 const previewOf = (file: Json, bytes = PNG, extra = {}) => ({ path: file, kind: 'image', mimeType: ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' } as Json)[file.slice(file.lastIndexOf('.') + 1).toLowerCase()] ?? 'image/svg+xml', size: bytes.length, modifiedAt: '2026-11-22T00:00:00.000Z', revision: 'rABC', encoding: 'base64', content: bytes.toString('base64'), offset: 0, ...extra });
 

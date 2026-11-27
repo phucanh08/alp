@@ -7,7 +7,7 @@ import path from 'node:path';
 import { ERROR, RPC_ERROR } from '@anhlp/alp-protocol';
 import type { AlpRuntime } from '@anhlp/alp-runtime/index';
 import type { createLogger } from '@anhlp/alp-core/log';
-import { RpcError } from '../../rpc-error.ts';
+import { RpcError } from '../../rpc/rpc-error.ts';
 import { projectKey, type ScheduleStore } from '../schedules.ts';
 import type { Scheduler } from '../scheduler.ts';
 

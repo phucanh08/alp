@@ -947,7 +947,7 @@ export function projectGitDiff(raw: unknown, { path }: { path?: string } = {}): 
 /**
  * The images a file view may show (workspace.files.preview through the gateway, host.files.preview
  * for the owner): raster formats only, by extension in any case, with the MIME type alpd answers for
- * each (packages/daemon/src/files.ts PREVIEW_IMAGES). SVG is left out on purpose: it is a document
+ * each (packages/daemon/src/workspaces/files.ts PREVIEW_IMAGES). SVG is left out on purpose: it is a document
  * that can carry script, so an .svg file stays text (workspace.files.read).
  */
 export const PREVIEW_IMAGE_TYPES = Object.freeze({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' });

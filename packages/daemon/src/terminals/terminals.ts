@@ -7,7 +7,7 @@ import { windowsPtySpawn, windowsShell, windowsTerminalCapability } from './back
 import path from 'node:path';
 import { ERROR, RPC_ERROR, TERMINAL, TERMINAL_LIMIT_KEYS, isTerminalId } from '@anhlp/alp-protocol';
 import type { TerminalEndReason, TerminalEvent, TerminalInfo, TerminalLimits } from '@anhlp/alp-protocol/rpc';
-import { RpcError } from '../rpc-error.ts';
+import { RpcError } from '../rpc/rpc-error.ts';
 import { TerminalScreen, SCREEN_LIMITS } from './terminal-screen.ts';
 
 /**
