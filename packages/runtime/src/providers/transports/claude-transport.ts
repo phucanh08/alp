@@ -1,14 +1,14 @@
-import { writablePath } from '../../permission-path.ts';
+import { writablePath } from '../../tools/permission-path.ts';
 import { accessSync, constants, existsSync, mkdirSync, realpathSync, rmdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { optionalRead, claudeUsage, claudeAccount } from '../../runtime-context.ts';
+import { optionalRead, claudeUsage, claudeAccount } from '../runtime-context.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { BOARD_KINDS_INPUT, PIN_BODY_CHARS, PIN_KINDS, PIN_PATH_CHARS, PIN_PATHS, PIN_PATHS_INPUT } from '../../board/board.ts';
 import { RESULT_OUTCOMES } from '../../assignments/completion/assignment-results.ts';
-import { inputLimitError, POUR_VARS, VAR_NAME, type InputLimits } from '../../input-limits.ts';
-import { claudeToolDetail, resultText } from '../../tool-detail.ts';
+import { inputLimitError, POUR_VARS, VAR_NAME, type InputLimits } from '../../_shared/input-limits.ts';
+import { claudeToolDetail, resultText } from '../../tools/tool-detail.ts';
 import { CLOSE_REASONS, GATE_KINDS, TASK_STATUSES, TASK_TYPES } from '@anhlp/alp-core/tasks';
 import { commandDecision, unwrapShell } from '@anhlp/alp-core/permissions';
 import { alpHome } from '@anhlp/alp-core/library';

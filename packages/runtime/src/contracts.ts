@@ -1,12 +1,12 @@
 import type { ProviderFactories, ProviderRegistry } from './providers/providers.ts';
-import type { RuntimeKind, SessionSpec } from './resolve.ts';
+import type { RuntimeKind, SessionSpec } from './providers/resolve.ts';
 import type { Envelope, SessionSnapshot, TreeStatus, UserQuestion } from './events.ts';
 import type { Pin } from './board/board.ts';
 import type { LiveEntry } from './sessions/lifecycle/live.ts';
-import type { ProviderUsage } from './usage.ts';
+import type { ProviderUsage } from './providers/usage.ts';
 import type { AcpProvider } from './providers/transports/acp-transport.ts';
 import type { AntigravityProvider } from './providers/transports/antigravity-transport.ts';
-import type { GitHubRunner } from './github.ts';
+import type { GitHubRunner } from './tools/github.ts';
 import type { AttachmentReader } from './attachments.ts';
 
 /** A slash command or skill an agent's composer offers after "/" (t-f628). */

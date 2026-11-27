@@ -3,7 +3,7 @@ import { CodexTransport } from './transports/transport.ts';
 import { ClaudeTransport } from './transports/claude-transport.ts';
 import { AcpTransport, type AcpProvider } from './transports/acp-transport.ts';
 import { AntigravityTransport, type AntigravityProvider } from './transports/antigravity-transport.ts';
-import type { RuntimeKind } from '../resolve.ts';
+import type { RuntimeKind } from './resolve.ts';
 import type { RuntimeOptions, RuntimeTransport } from '../contracts.ts';
 
 /** The environment a native harness starts with: the host's, without variables that would tie it to the host's own agent session. */

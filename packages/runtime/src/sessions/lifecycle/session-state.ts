@@ -1,7 +1,7 @@
 import type { NativeBase, RuntimeTransport } from '../../contracts.ts';
-import type { RuntimeKind, SessionSpec, ResolvedSession } from '../../resolve.ts';
-import type { MailEvent } from '../../mailbox.ts';
-import type { Worktree, WorktreeChange, Copy } from '../../workspace.ts';
+import type { RuntimeKind, SessionSpec, ResolvedSession } from '../../providers/resolve.ts';
+import type { MailEvent } from '../../assignments/mailbox.ts';
+import type { Worktree, WorktreeChange, Copy } from '../../assignments/isolation/workspace.ts';
 import type { Verification } from '@anhlp/alp-core/verify';
 import type { Handoff } from '../../assignments/completion/handoff.ts';
 import type { SessionUsage } from '../../events.ts';

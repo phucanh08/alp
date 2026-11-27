@@ -848,7 +848,7 @@ export const GATE_OPTION_CHARS: number = 200;
 export const GATE_CHANNELS: GateChannel[] = ['paseo', 'web', 'cli'];
 /**
  * The Reject answer a gate card adds after its options, in every language ALP writes it
- * (packages/runtime/src/language.ts, `reject`). An option that is one would hide that Reject
+ * (packages/runtime/src/_shared/language.ts, `reject`). An option that is one would hide that Reject
  * and approve the gate instead, so no option may be one (t-595d).
  */
 export const GATE_REJECT_LABELS: string[] = ['Reject', 'Từ chối'];

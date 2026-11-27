@@ -1,12 +1,12 @@
 import { CLOSE_REASONS, GATE_KINDS, TASK_STATUSES, TASK_TYPES, TASKS_DIR, type Task } from '@anhlp/alp-core/tasks';
-import { READ_ONLY_AGENTS, type ResolvedSession } from './resolve.ts';
+import { READ_ONLY_AGENTS, type ResolvedSession } from '../providers/resolve.ts';
 import { READ_ONLY_ROLES } from '@anhlp/alp-core/permissions';
 
-import { PIN_KINDS, PIN_PATH_CHARS, PIN_PATHS } from './board/board.ts';
-import { POUR_VARS } from './input-limits.ts';
-import { RECALL_KEEP_MS } from './assignments/recall.ts';
-import { RESULT_OUTCOMES } from './assignments/completion/assignment-results.ts';
-import { HANDOFF_OUTCOMES, VERDICT_RESULTS, CRITERION_RESULTS, SEVERITIES } from './assignments/completion/handoff.ts';
+import { PIN_KINDS, PIN_PATH_CHARS, PIN_PATHS } from '../board/board.ts';
+import { POUR_VARS } from '../_shared/input-limits.ts';
+import { RECALL_KEEP_MS } from '../assignments/recall.ts';
+import { RESULT_OUTCOMES } from '../assignments/completion/assignment-results.ts';
+import { HANDOFF_OUTCOMES, VERDICT_RESULTS, CRITERION_RESULTS, SEVERITIES } from '../assignments/completion/handoff.ts';
 
 export const handoffList = (description: string) => ({ type: 'array', items: { type: 'string' }, description });
 

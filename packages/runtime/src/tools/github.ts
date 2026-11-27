@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { gitEnvironment } from './workspace.ts';
+import { gitEnvironment } from '../assignments/isolation/workspace.ts';
 
 /** Where agents send feedback about ALP itself: its process, tools and agent instructions. */
 export const ALP_REPO = 'phucanh08/alp';

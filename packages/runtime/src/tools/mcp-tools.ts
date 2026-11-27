@@ -3,7 +3,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
-import { inputLimitError, type InputLimits } from './input-limits.ts';
+import { inputLimitError, type InputLimits } from '../_shared/input-limits.ts';
 
 type Tool = { name: string; description: string; inputSchema: unknown };
 type Server = { command?: string; args?: string[]; env?: Record<string, string>; cwd?: string; url?: string; http_headers?: Record<string, string> };

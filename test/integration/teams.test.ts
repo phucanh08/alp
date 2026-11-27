@@ -26,7 +26,7 @@ after(async () => {
 });
 
 // Each team's house rules, as shipped: the runtime prints them after the profile line. A custom
-// graph has no team of its own and falls back to Phở's (packages/runtime/src/resolve.ts).
+// graph has no team of its own and falls back to Phở's (packages/runtime/src/providers/resolve.ts).
 const HOUSE_RULES = (mode: string) => `Profile: ${mode}; fixed for this session. ${templateText(`teams/${mode === 'custom' ? 'pho' : mode}/HOUSE_RULES.md`).trim()}`;
 
 async function fixture(t: TestContext) {

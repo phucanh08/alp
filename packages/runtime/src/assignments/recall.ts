@@ -1,8 +1,8 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
-import type { RuntimeKind } from '../resolve.ts';
-import { tell } from '../write-error.ts';
+import type { RuntimeKind } from '../providers/resolve.ts';
+import { tell } from '../_shared/write-error.ts';
 
 /**
  * Finished assignments whose native threads alp_recall can question (ALPD §27).

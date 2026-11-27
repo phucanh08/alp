@@ -3,11 +3,11 @@ import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { moveFile } from '@anhlp/alp-core/atomic';
 import path from 'node:path';
 import { BOARD_KEEP, live, normalizePaths, overlapping, PIN_BODY_CHARS, PIN_KINDS, renderPin, type Pin, type PinKind } from './board.ts';
-import { plainObject, toolResult } from '../tool-results.ts';
+import { plainObject, toolResult } from '../tools/tool-results.ts';
 import type { RuntimeOptions } from '../contracts.ts';
 import type { Session } from '../sessions/lifecycle/session-state.ts';
 import type { AlpEvent } from '../events.ts';
-import type { MailEvent } from '../mailbox.ts';
+import type { MailEvent } from '../assignments/mailbox.ts';
 
 type BoardContext = {
   options: RuntimeOptions;
